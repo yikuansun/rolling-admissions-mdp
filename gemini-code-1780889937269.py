@@ -4,8 +4,8 @@ from scipy.stats import binom
 # =====================================================================
 # 1. MODEL PARAMETERS & STATE SPACE INITIALIZATION
 # =====================================================================
-C = 100        # Maximum admission capacity of the school
-T = 60         # Total finite time horizon
+C = 20         # Maximum admission capacity of the school
+T = 15         # Total finite time horizon
 
 # Quality rewards per student type
 q_H = 2.0      
