@@ -2,7 +2,7 @@
  * Default/initial model parameters for a quick start.
  */
 
-import type { ModelParameters, Policy } from './types';
+import type { ModelParameters, StaticPolicy } from './types';
 
 /** Create default model parameters. */
 export function createDefaultParams(): ModelParameters {
@@ -46,7 +46,7 @@ export function createDefaultParams(): ModelParameters {
   return { T, r, C, W, p, lambda, theta, mu };
 }
 
-/** Create a default policy (zeros — no offers). */
-export function createDefaultPolicy(T: number, r: number): Policy {
+/** Create a default static policy (zeros — no offers). */
+export function createDefaultStaticPolicy(T: number, r: number): StaticPolicy {
   return Array.from({ length: T }, () => new Array(r).fill(0));
 }

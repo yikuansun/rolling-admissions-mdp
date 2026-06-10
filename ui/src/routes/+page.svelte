@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     createDefaultParams,
-    createDefaultPolicy,
+    createDefaultRulePolicy,
     runMonteCarloSimulations,
   } from '$lib/simulation';
   import type { ModelParameters, Policy, SimulationResult } from '$lib/simulation';
@@ -12,7 +12,7 @@
   // --- State ---
   let activeTab: 'params' | 'policy' | 'results' = $state('params');
   let params: ModelParameters = $state(createDefaultParams());
-  let policy: Policy = $state(createDefaultPolicy(params.T, params.r));
+  let policy: Policy = $state(createDefaultRulePolicy(params.r));
   let numRuns: number = $state(100);
   let results: SimulationResult[] = $state([]);
   let running: boolean = $state(false);
@@ -40,9 +40,11 @@
         )
       )
     );
-    policy = Array.from({ length: params.T }, (_, t) =>
-      Array.from({ length: params.r }, (_, i) => policy[t]?.[i] ?? 0)
-    );
+
+    // Rebuild rule policy: filter out rules referencing tiers that no longer exist
+    if (policy.kind === 'rules') {
+      policy.rules = policy.rules.filter(r => r.tier < params.r);
+    }
   }
 
   function runSim() {

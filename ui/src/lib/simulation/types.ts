@@ -63,5 +63,46 @@ export interface SimulationResult {
   matriculatedByTier: number[];
 }
 
-/** Policy: actions[t][i] = number of tier-i offers at period t. */
-export type Policy = number[][];
+/** Static policy: actions[t][i] = number of tier-i offers at period t. */
+export type StaticPolicy = number[][];
+
+/**
+ * A single threshold-based policy rule.
+ * Evaluated per tier: "If waitlist for this tier >= minWaitlist
+ * AND remaining capacity >= minCapacity, offer `offersToExtend` slots."
+ */
+export interface PolicyRule {
+  /** Tier index (0-based) */
+  tier: number;
+  /** Minimum waitlist count for this tier to trigger the rule */
+  minWaitlist: number;
+  /** Minimum remaining capacity required to trigger the rule */
+  minCapacity: number;
+  /** Number of offers to extend when rule fires */
+  offersToExtend: number;
+}
+
+/**
+ * A rule-based policy: a list of rules evaluated in priority order (first match wins per tier).
+ * Rules are grouped by tier and evaluated top-to-bottom.
+ */
+export interface RulePolicy {
+  kind: 'rules';
+  /** Rules evaluated in order. Higher-priority rules come first. */
+  rules: PolicyRule[];
+}
+
+/** A fixed (information-independent) policy. */
+export interface FixedPolicy {
+  kind: 'fixed';
+  actions: StaticPolicy;
+}
+
+/** Union type for all policy representations. */
+export type Policy = RulePolicy | FixedPolicy;
+
+/**
+ * A policy function that maps (state, period, params) -> action vector.
+ * This is the runtime interface consumed by the engine.
+ */
+export type PolicyFn = (state: State, t: number, params: ModelParameters) => Action;

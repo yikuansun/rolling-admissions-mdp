@@ -8,8 +8,9 @@
  * 4. Clock tick (offers age down)
  */
 
-import type { ModelParameters, State, Action, PeriodRecord, SimulationResult, Policy } from './types';
+import type { ModelParameters, State, Action, PeriodRecord, SimulationResult, Policy, PolicyFn } from './types';
 import { sampleBinomial, sampleMultinomial } from './random';
+import { compilePolicyFn } from './policy';
 
 /** Deep-clone a state object. */
 function cloneState(s: State): State {
@@ -124,16 +125,19 @@ export function simulatePeriod(state: State, t: number, action: Action, params: 
 }
 
 /**
- * Run a full simulation from t=0 to t=T using a fixed policy.
+ * Run a full simulation from t=0 to t=T using a policy (rule-based or fixed).
  */
 export function runSimulation(params: ModelParameters, policy: Policy): SimulationResult {
   const { T, r, C } = params;
+  const policyFn = compilePolicyFn(policy);
   let state = createInitialState(params);
   const periods: PeriodRecord[] = [];
 
   for (let t = 0; t < T; t++) {
     const stateBefore = cloneState(state);
-    const action = policy[t] ?? new Array(r).fill(0);
+
+    // Evaluate policy against current state
+    const action = policyFn(state, t, params);
 
     // Clamp action to feasible set
     const cap = remainingCapacity(state, C);
