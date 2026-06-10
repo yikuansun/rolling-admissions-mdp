@@ -23,6 +23,7 @@
 		"vite": "^8.0.16"
 	},
 	"dependencies": {
+		"chart.js": "^4.5.1",
 		"katex": "^0.17.0"
 	}
 }
