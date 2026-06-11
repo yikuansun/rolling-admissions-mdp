@@ -6,10 +6,10 @@ import type { ModelParameters, StaticPolicy } from './types';
 
 /** Create default model parameters. */
 export function createDefaultParams(): ModelParameters {
-  const T = 10;
-  const r = 3;
-  const C = 5;
-  const W = 2;
+  const T = 60;
+  const r = 10;
+  const C = 30;
+  const W = 5;
 
   // Uniform arrival: each tier has 0.1 probability per period
   const p = Array.from({ length: r }, () => new Array(T).fill(0.1));
