@@ -108,14 +108,16 @@
               <td class="p-2 font-medium">Tier {i + 1}</td>
               {#each Array(params.T) as _, t}
                 <td class="p-1">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="1"
-                    class="border rounded px-1 py-0.5 w-16 text-xs"
-                    bind:value={params.p[i][t]}
-                  />
+                  {#if params.p[i]}
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1"
+                      class="border rounded px-1 py-0.5 w-16 text-xs"
+                      bind:value={params.p[i][t]}
+                    />
+                  {/if}
                 </td>
               {/each}
             </tr>
@@ -145,14 +147,16 @@
               <td class="p-2 font-medium">Tier {i + 1}</td>
               {#each Array(params.T) as _, t}
                 <td class="p-1">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="1"
-                    class="border rounded px-1 py-0.5 w-16 text-xs"
-                    bind:value={params.lambda[i][t]}
-                  />
+                  {#if params.lambda[i]}
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1"
+                      class="border rounded px-1 py-0.5 w-16 text-xs"
+                      bind:value={params.lambda[i][t]}
+                    />
+                  {/if}
                 </td>
               {/each}
             </tr>
