@@ -2,7 +2,13 @@
   import { renderToString as renderLatex } from 'katex';
   import 'katex/dist/katex.min.css';
   import type { ModelParameters, Policy, PolicyRule } from '$lib/simulation';
-  import { createDefaultRulePolicy } from '$lib/simulation';
+  import {
+    createDefaultRulePolicy,
+    generatePolicyRulesTemplate,
+    parsePolicyRulesCSV,
+    downloadFile,
+    promptFileUpload,
+  } from '$lib/simulation';
 
   let { params, policy = $bindable(), running, onRun }: {
     params: ModelParameters;
@@ -10,6 +16,8 @@
     running: boolean;
     onRun: () => void;
   } = $props();
+
+  let importError: string = $state('');
 
   function latex(s: string): string {
     return renderLatex(s, { throwOnError: false });
@@ -38,9 +46,41 @@
     [newRules[index], newRules[target]] = [newRules[target], newRules[index]];
     policy.rules = newRules;
   }
+
+  // --- CSV Import/Export ---
+  function downloadPolicyTemplate() {
+    if (policy.kind !== 'rules') return;
+    const csv = generatePolicyRulesTemplate(policy.rules);
+    downloadFile(csv, 'policy_rules.csv');
+  }
+
+  async function importPolicyCSV() {
+    importError = '';
+    const text = await promptFileUpload('.csv');
+    if (!text) return;
+    const rules = parsePolicyRulesCSV(text);
+    if (!rules) {
+      importError = 'Failed to parse policy rules CSV. Check the format (columns: Priority, Tier, Min Waitlist, Min Capacity, Offers to Extend).';
+      return;
+    }
+    // Validate tier indices against current params
+    const invalid = rules.filter(r => r.tier >= params.r);
+    if (invalid.length > 0) {
+      importError = `Warning: ${invalid.length} rule(s) reference tiers beyond the current ${params.r} tiers and were removed.`;
+      policy = { kind: 'rules', rules: rules.filter(r => r.tier < params.r) };
+    } else {
+      policy = { kind: 'rules', rules };
+    }
+  }
 </script>
 
 <div>
+  {#if importError}
+    <div class="p-3 mb-4 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+      {importError}
+    </div>
+  {/if}
+
   {#if policy.kind === 'rules'}
     <div class="mb-4">
       <h2 class="text-lg font-semibold mb-2">Threshold Rules</h2>
@@ -48,6 +88,22 @@
         Rules are evaluated <strong>in order</strong> for each tier. The first matching rule per tier determines
         the action ({@html latex('k_{i,t}')}). If no rule matches, no offers are extended.
       </p>
+
+      <!-- CSV buttons -->
+      <div class="flex gap-2 mb-4">
+        <button
+          class="text-xs bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-1"
+          onclick={downloadPolicyTemplate}
+        >
+          ⬇ Download CSV
+        </button>
+        <button
+          class="text-xs bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded px-2 py-1"
+          onclick={importPolicyCSV}
+        >
+          ⬆ Import CSV
+        </button>
+      </div>
 
       <div class="space-y-2">
         {#each policy.rules as rule, idx}
