@@ -11,3 +11,7 @@ This is part of an operations research project surrounding MBA Admissions. The g
 - `simulation/`: Directory containing the simulation code
   - `lib/simulation/`: Directory containing main simulation code and logic
   - `routes/`: Frontend code for the simulation UI
+
+## Usage
+
+The project is deployed at https://yikuansun.github.io/rolling-admissions-mdp/. To run the simulation locally, run `npm run dev` in the `simulation/` directory.
