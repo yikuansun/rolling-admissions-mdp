@@ -1,130 +1,157 @@
 \documentclass{article}
 \usepackage{graphicx} % Required for inserting images
 \usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{parskip}
 
 \title{Rolling Admissions MDP}
 \author{Yikuan Sun}
 \date{June 2026}
 
 \newcommand{\Binomial}{\mathrm{Binomial}}
+\newcommand{\Poisson}{\mathrm{Poisson}}
+\newcommand{\Multinomial}{\mathrm{Multinomial}}
 \newcommand{\Set}[1]{\left\{ #1 \right\}}
 
 \begin{document}
+
+
+
 
 \maketitle
 
 
 \section{Setup and Assumptions}
 
-Discrete time, finite horizon ($t = 1, 2, \dots, T$).
+The system operates in discrete time on a finite horizon $t \in \{1, 2, \dots, T\}$. We discretize the student population using two parameters:
+\begin{enumerate}
+    \item \textbf{Quality Tier:} $i \in \{1, \dots, r\}$, where $q_i = i/r$ represents the normalized quality of a student in tier $i$.
+    \item \textbf{Attribute Combination:} $a \in \{1, \dots, A\}$, representing unique cross-products of diversity attributes (e.g., gender, nationality, socioeconomic status).
+\end{enumerate}
 
-Each applicant belongs to one of $r \in \mathbb{N}$ quality tiers. A student in tier $i \in \{1, 2, \dots, r\}$ has a discretized quality value of $q_i = \frac{i}{r}$. If a student with quality $q_i$ matriculates, the school receives a terminal value proportional to $q_i$.
+Students are partitioned into $r \times A$ distinct buckets. To preserve high-fidelity behavioral tracking without losing computational efficiency, we track the system state using three primary multi-dimensional matrices:
+\begin{itemize}
+    \item \textbf{Waitlist ($\mathbf{N}_t \in \mathbb{N}_0^{r \times A \times \tau_{\max}}$):} Counts of applicants who have applied but have not yet been extended an offer, partitioned by tier $i$, attribute combination $a$, and the number of periods the applicant has spent on the waitlist $\tau \in \Set{1, \dots, \tau_{\max}}$.
+    \item \textbf{Matriculated Students ($\mathbf{M}_t \in \mathbb{N}_0^{r \times A}$):} Counts of students who have received an offer and accepted it, tracked by tier $i$ and attribute combination $a$.
+    \item \textbf{Outstanding Offers ($\mathbf{O}_t \in \mathbb{N}_0^{r \times A \times W}$):} Counts of pending offers, partitioned by tier $i$, attribute combination $a$, and remaining decision periods $w \in \{1, \dots, W\}$.
+\end{itemize}
 
-If a student applies, she is immediately placed onto a waitlist. The waitlist at time $t$ is described by the vector $\mathbf{n}_t = (n_{1, t}, n_{2, t}, \dots, n_{r, t})$, where $n_{i, t}$ is the number of tier-$i$ students on the waitlist. We assume $\mathbf{n}_0 = \mathbf{0}$.
-
-We use the vector $\mathbf{m}_t = (m_{1, t}, m_{2, t}, \dots, m_{r, t})$ to track matriculated students, where $m_{i, t}$ is the number of tier-$i$ students who have already accepted an offer. We assume $\mathbf{m}_0 = \mathbf{0}$. The number of remaining slots is denoted by $c_t = C - \sum_{i=1}^r m_{i, t}$, where $C$ is the maximum capacity of the school. 
-
-Admitted students are given a hard window of $W$ periods to respond to an offer. The outstanding offers at time $t$ are tracked via an $r \times W$ matrix $\mathbf{O}_t$, where the element $o_{i, t}^w$ represents the number of pending offers to tier-$i$ students that have exactly $w \in \{1, 2, \dots, W\}$ periods of validity remaining (including the current period). We assume $\mathbf{O}_0 = \mathbf{0}$.
-
-At any time $t$, the exact state of the system is described by the tuple $S_t = (\mathbf{m}_t, \mathbf{n}_t, \mathbf{O}_t)$.
+We assume the initial state $\mathbf{N}_0 = \mathbf{M}_0 = \mathbf{O}_0 = \mathbf{0}$. At any time $t$, the state of the system is uniquely described by the tuple $S_t = (\mathbf{M}_t, \mathbf{N}_t, \mathbf{O}_t)$. The remaining physical capacity of the incoming class is denoted by $c_t = C - \sum_{i=1}^r \sum_{a=1}^A m_{i, a, t}$, where $C$ is the institution's total capacity target.
 
 \section{Time-Dependent Transition Probabilities}
 
-To align the model with historical empirical data, all transition and arrival dynamics are generalized to be time-dependent. 
-
+To align the model with historical empirical data, all transition and arrival dynamics are generalized to be time-dependent.
 \begin{itemize}
-    \item \textbf{Applicant Arrivals:} In each period $t$, at most one new applicant enters the system. Let $p_i(t)$ denote the probability that a student of tier $i$ arrives at time $t$. To ensure a valid probability distribution, we require:
-    \[
-    \sum_{i=1}^r p_i(t) \leq 1 \quad \forall t \in \{1, 2, \dots, T\}
-    \]
-    The probability that no applicant arrives during period $t$ is given by $1 - \sum_{i=1}^r p_i(t)$.
+    \item \textbf{Applicant Arrivals:} The total number of new arrivals at time $t$, denoted by $E_t$, follows a Poisson distribution with mean $\lambda(t)$:
+\[
+    E_t \sim \Poisson(\lambda(t))
+\]
+Each arriving applicant is independently assigned to a quality tier $i$ and attribute combination $a$ with probability $\pi_{i, a}(t)$, where $\sum_{i, a} \pi_{i, a}(t) = 1$. The number of arrivals into each specific bucket $(i, a)$ at time $t$, denoted by $\Delta n_{i, a, t}$, is jointly modeled using a multinomial distribution:
+\[
+(\Delta n_{1, 1, t}, \dots, \Delta n_{r, A, t}) \sim \Multinomial\left(E_t, \, [\pi_{1, 1}(t), \dots, \pi_{r, A}(t)]\right)
+\]
+New applicants always enter the waitlist with an initial tenure of $\tau = 1$.
 
-    \item \textbf{Waitlist Dropouts:} A student of tier $i$ remaining on the waitlist at time $t$ independently drops out of the admissions process with probability $\lambda_i(t)$.
+    \item \textbf{Waitlist Dropouts:} A student of tier $i$ and attribute combination $a$ remaining on the waitlist with tenure $\tau$ at time $t$ independently drops out of the admissions process with a tenure-fatigued probability $\delta_{i, a}(t, \tau)$. The number of students who survive attrition and remain available for period $t+1$ is modeled binomially:
+\[
+    n_{i, a, \tau+1, t+1} \sim \Binomial( \tilde{n}_{i, a, \tau, t}, \, 1 - \delta_{i, a}(t, \tau) )
+\]
 
-    \item \textbf{Outstanding Offer Responses:} Let $w \in \{1, 2, \dots, W\}$ represent the number of periods remaining before an offer's decision deadline (including the current period). At time $t$, a tier-$i$ student holding an offer with $w$ periods remaining will:
+    \item \textbf{Outstanding Offer Responses:} Let $w \in \{1, 2, \dots, W\}$ represent the number of periods remaining before an offer's decision deadline. At time $t$, a student in quality tier $i$ and attribute combination $a$ holding an offer with $w$ periods remaining will execute one of three choices:
     \begin{itemize}
-        \item \textbf{Accept} the offer with probability $\theta_i(t, w)$,
-        \item \textbf{Reject} the offer with probability $\mu_i(t, w)$,
-        \item \textbf{Remain undecided} with probability $1 - \theta_i(t, w) - \mu_i(t, w)$.
+        \item \textbf{Accept} the offer with probability $\theta_{i, a}(t, w)$,
+        \item \textbf{Reject} the offer (or let it expire) with probability $\mu_{i, a}(t, w)$,
+        \item \textbf{Remain undecided} with probability $1 - \theta_{i, a}(t, w) - \mu_{i, a}(t, w)$.
     \end{itemize}
-    Because students cannot remain undecided once the decision window expires, we enforce the boundary constraint:
+    Because students cannot remain undecided once the decision window expires, we enforce the hard boundary constraint:
     \[
-    \theta_i(t, 1) + \mu_i(t, 1) = 1 \quad \forall i, \forall t
+    \theta_{i, a}(t, 1) + \mu_{i, a}(t, 1) = 1 \quad \forall i, \forall a, \forall t
     \]
-    For all periods with remaining validity ($w > 1$), the probability of remaining undecided is strictly non-negative, implying $\theta_i(t, w) + \mu_i(t, w) \leq 1$.
+    For all periods with remaining validity ($w > 1$), the probability of remaining undecided is strictly non-negative, implying $\theta_{i, a}(t, w) + \mu_{i, a}(t, w) \leq 1$.
 \end{itemize}
 
 \section{Timeline and Action Constraints}
 
-Let $S_t = (\mathbf{m}_t, \mathbf{n}_t, \mathbf{O}_t)$ denote the exact state of the admissions system at the beginning of period $t$. Within each period, events occur in the following chronological order:
+Within each period $t$, events occur in the following precise chronological order:
 
 \begin{enumerate}
-    \item \textbf{Arrival Phase:} A single applicant of tier $i$ arrives with probability $p_i(t)$ and is added to the waitlist. We define the intermediate, post-arrival waitlist vector as $\mathbf{n}_t'$, where:
+    \item \textbf{Arrival Phase:} The system experiences a stochastic influx of new applicants $\Delta n_{i, a, t}$ determined by the Poisson-Multinomial process. We define the intermediate, post-arrival waitlist tensor as $\mathbf{N}_t'$, where arrivals append directly to the first tenure slice:
     \[
-    n_{j, t}' = 
+    n_{i, a, \tau, t}' = 
     \begin{cases} 
-    n_{j, t} + 1 & \text{if a tier-}i\text{ student arrives and } j = i, \\
-    n_{j, t} & \text{otherwise.}
+    n_{i, a, 1, t} + \Delta n_{i, a, t} & \text{if } \tau = 1, \\
+    n_{i, a, \tau, t} & \text{if } \tau > 1.
     \end{cases}
     \]
     
-    \item \textbf{Decision Phase:} The school observes the post-arrival state and selects an admission action vector $\mathbf{k}_t = (k_{1, t}, \dots, k_{r, t})$, where $k_{i,t}$ is the number of offers extended to tier-$i$ waitlist applicants. The chosen action must belong to the feasible action space $\mathcal{K}(S_t)$, defined by:
+    \item \textbf{Decision Phase:} The school observes the post-arrival state $S_t' = (\mathbf{M}_t, \mathbf{N}_t', \mathbf{O}_t)$ and selects an admission action matrix $\mathbf{K}_t \in \mathbb{N}_0^{r \times A \times \tau_{\max}}$, where $k_{i, a, \tau, t}$ is the number of offers extended to waitlist applicants in bucket $(i, a, \tau)$. The chosen action must belong to the feasible action space $\mathcal{K}(S_t)$, defined by structural and capacity boundaries:
     \[
-    \mathcal{K}(S_t) = \Set{\mathbf{k}_t \in \mathbb{N}_0^r \;\middle|\; k_{i,t} \leq n_{i,t}' \;\; \forall i, \text{ and } \sum_{i=1}^r k_{i,t} \leq c_t}
+    \mathcal{K}(S_t) = \Set{\mathbf{K}_t \in \mathbb{N}_0^{r \times A \times \tau_{\max}} \;\middle|\; k_{i, a, \tau, t} \leq n_{i, a, \tau, t}' \;\; \forall i, a, \tau, \text{ and } \sum_{i, a, \tau} k_{i, a, \tau, t} \leq c_t}
     \]
-    The state variables are immediately modified to their post-decision values:
+    The state variables are immediately modified to their intermediate, post-decision values:
     \begin{itemize}
-        \item Post-decision waitlist: $\tilde{n}_{i, t} = n_{i, t}' - k_{i, t}$
-        \item Post-decision offers at the maximum window: $\tilde{o}_{i, t}^W = o_{i, t}^W + k_{i, t}$ (for all shorter horizons $w < W$, the offer counts remain unaltered: $\tilde{o}_{i, t}^w = o_{i, t}^w$).
+        \item Post-decision waitlist: $\tilde{n}_{i, a, \tau, t} = n_{i, a, \tau, t}' - k_{i, a, \tau, t}$
+        \item Post-decision offers at maximum window: All newly extended offers enter at the full horizon $W$:
+        \[
+        \tilde{o}_{i, a, W, t} = o_{i, a, W, t} + \sum_{\tau=1}^{\tau_{\max}} k_{i, a, \tau, t}
+        \]
+        For all shorter horizons $w < W$, the outstanding offer counts remain unaltered: $\tilde{o}_{i, a, w, t} = o_{i, a, w, t}$.
     \end{itemize}
 
     \item \textbf{Stochastic Response Phase:} 
     \begin{itemize}
-        \item Remaining waitlist students ($\tilde{\mathbf{n}}_t$) independently choose to drop out of the process or remain.
-        \item Holders of outstanding offers ($\tilde{\mathbf{O}}_t$) execute their choices to accept, reject, or remain undecided.
+        \item Remaining waitlist students ($\tilde{\mathbf{N}}_t$) independently choose to drop out or remain based on $\delta_{i, a}(t, \tau)$.
+        \item Holders of post-decision outstanding offers ($\tilde{\mathbf{O}}_t$) execute their choices to accept, reject, or remain undecided.
     \end{itemize}
 
-    \item \textbf{Clock Ticks:} Undecided offers age down by one period of validity, and the system clock increments from $t \to t + 1$.
+    \item \textbf{Clock Ticks:} Undecided offers age down by one period of validity, surviving waitlist candidates age by one period of tenure, and the system clock increments from $t \to t + 1$.
 \end{enumerate}
 
 \section{Stochastic Transition Dynamics}
 
-To simulate the state's transition from time $t$ to $t + 1$, we sample from Binomial and Multinomial distributions based on the post-decision variables.
+To simulate the state's transition from time $t$ to $t + 1$, we sample from Binomial and Multinomial distributions based on the post-decision parameters.
 
-\subsection{Waitlist updates}
-Students on the post-decision waitlist independently drop out with probability $\lambda_i(t)$. The number of remaining students follows a Binomial distribution:
+\subsection{Waitlist Updates}
+Students remaining on the post-decision waitlist experience attrition. The candidates who do not drop out advance to the next tenure increment $\tau + 1$ for the subsequent period:
 \[
-n_{i, t + 1} \sim \Binomial( \tilde{n}_{i, t},\, 1 - \lambda_i(t)) \quad \forall i \in \left\{1, \dots, r\right\}
+n_{i, a, \tau+1, t+1} \sim \Binomial(\tilde{n}_{i, a, \tau, t}, \, 1 - \delta_{i, a}(t, \tau)) \quad \forall \tau \in \{1, \dots, \tau_{\max}-1\}
 \]
+Note that any student reaching $\tau > \tau_{\max}$ is automatically cleared from the system due to expiration. New arrivals at $t+1$ will populate the $\tau = 1$ boundary slice.
 
 \subsection{Outstanding Offer Decisions}
-For each tier $i$ and each remaining offer validity window $w \in \left\{1, \dots, W\right\}$, the pool of post-decision outstanding offers $o_{i, t}^w$ splits into three disjoint components. Let:
+For each tier $i$, attribute combination $a$, and remaining validity window $w \in \left\{1, \dots, W\right\}$, the pool of post-decision outstanding offers $\tilde{o}_{i, a, w, t}$ splits into three disjoint components:
 \begin{itemize}
-    \item $A_{i, t}^w$ be the number of students who accept the offer at time $t$,
-    \item $R_{i, t}^w$ be the number of students who reject (or let expire) the offer at time $t$,
-    \item $U_{i, t}^w$ be the number of students who remain undecided (do nothing) at time $t$.
+    \item $A_{i, a, t}^w$: The number of students who accept the offer at time $t$,
+    \item $R_{i, a, t}^w$: The number of students who reject (or let expire) the offer at time $t$,
+    \item $U_{i, a, t}^w$: The number of students who remain undecided at time $t$.
 \end{itemize}
-These outcomes are jointly modeled using a Multinomial distribution:
+These outcomes are jointly simulated via a cell-wise Multinomial draw:
 \[
-\left(A_{i, t}^w,\ R_{i, t}^w,\ U_{i, t}^w\right) \sim \mathrm{Multinomial}(\tilde{o}_{i, t}^w, \ [\theta_i(t, w), \, \mu_i(t, w), \, 1 - \theta_i(t, w) - \mu_i(t, w)])
+\left(A_{i, a, t}^w,\ R_{i, a, t}^w,\ U_{i, a, t}^w\right) \sim \Multinomial\left(\tilde{o}_{i, a, w, t}, \ [\theta_{i, a}(t, w), \, \mu_{i, a}(t, w), \, 1 - \theta_{i, a}(t, w) - \mu_{i, a}(t, w)]\right)
 \]
-Recall that $\theta_i(t, 1) + \mu_i(t, 1) = 1$, so $U_{i, t}^1 = 0$.
 
 \subsection{State Progression to $t + 1$}
-Once the stochastic variables are sampled, the state components at the start of period $t+1$ are compiled.
-
-The matriculation vector accumulates all new acceptances across outstanding cohorts:
+Once the stochastic variables are sampled, the components for period $t+1$ are compiled. The matriculation matrix accounts for all new acceptances across outstanding valid horizons:
 \[
-m_{i, t + 1} = m_{i, t} + \sum_{w = 1}^W A_{i, t}^w \quad \forall i \in \left\{ 1, \dots, r \right\}
+m_{i, a, t+1} = m_{i, a, t} + \sum_{w = 1}^W A_{i, a, t}^w \quad \forall i, \forall a
 \]
 
-The outstanding offer matrix updates by incrementing the undecided segments down by one period. For all $i \in \left\{1, \dots, r\right\}$, the updated matrix elements are given by:
+The outstanding offer matrix updates by decrementing the undecided segments down by one validity horizon. For all $i \in \left\{1, \dots, r\right\}$ and $a \in \left\{1, \dots, A\right\}$, the elements progress as:
 \[
-o_{i, t + 1}^w = \begin{cases}
-    U_{i, t}^{w + 1} & \text{if } w < W \\ 0 & \text{if } w = W
+o_{i, a, w, t + 1} = \begin{cases}
+    U_{i, a, t}^{w + 1} & \text{if } w < W, \\ 
+    0 & \text{if } w = W.
 \end{cases}
 \]
 
+\section{Objective Function}
 
+The goal of the Markov Decision Process is to find an admission policy that maximizes total expected Net Benefit $Z$. The terminal reward captures cumulative class quality balanced against structural regularizations penalizing a lack of group diversity and class overbooking. 
+
+Let $M_{a, T} = \sum_{i=1}^r m_{i, a, T}$ denote the aggregate count of matriculated students belonging to attribute combination $a$ at the terminal horizon, and let $M_T = \sum_{i=1}^r \sum_{a=1}^A m_{i, a, T}$ equal the total final class size. The Herfindahl-Hirschman Index ($\mathrm{HHI}$) measures representation concentration across diversity attribute combinations. The objective function is formulated as:
+\[
+    Z = \underbrace{\sum_{i=1}^r \sum_{a=1}^A m_{i, a, T} \cdot q_i}_{\text{Class Quality}} - \underbrace{\phi \cdot \sum_{a=1}^A \left( \frac{M_{a, T}}{M_T} \right)^2}_{\text{Diversity Penalty (HHI)}} - \underbrace{\psi \cdot \max\left(0, M_T - C\right)^2}_{\text{Overbooking Penalty}}
+\]
+where $\phi$ balances the marginal value of background representation and $\psi$ scales the quadratic cost of violating physical enrollment capacity limitations.
 
 \end{document}
