@@ -6,3 +6,5 @@ export * from './random';
 export * from './defaults';
 export * from './policy';
 export * from './csv-import';
+export * from './optimizer';
+export * from './serialization';

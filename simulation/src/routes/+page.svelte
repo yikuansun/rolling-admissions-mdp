@@ -8,9 +8,10 @@
   import ModelParametersTab from './ModelParametersTab.svelte';
   import PolicyTab from './PolicyTab.svelte';
   import ResultsTab from './ResultsTab.svelte';
+  import OptimizerTab from './OptimizerTab.svelte';
 
   // --- State ---
-  let activeTab: 'params' | 'policy' | 'results' = $state('params');
+  let activeTab: 'params' | 'policy' | 'results' | 'optimizer' = $state('params');
   let params: ModelParameters = $state(createDefaultParams());
   let policy: Policy = $state(createDefaultRulePolicy(params.r));
   let numRuns: number = $state(100);
@@ -26,6 +27,11 @@
       activeTab = 'results';
       setTimeout(() => resultsTab?.renderChart(), 50);
     }, 20);
+  }
+
+  function applyOptimizedPolicy(optimizedPolicy: Policy) {
+    policy = optimizedPolicy;
+    activeTab = 'policy';
   }
 </script>
 
@@ -51,6 +57,14 @@
       Policy
     </button>
     <button
+      class="px-4 py-2 -mb-px text-sm font-medium transition-colors {activeTab === 'optimizer'
+        ? 'border-b-2 border-purple-500 text-purple-600'
+        : 'text-gray-500 hover:text-gray-700'}"
+      onclick={() => (activeTab = 'optimizer')}
+    >
+      Optimizer
+    </button>
+    <button
       class="px-4 py-2 -mb-px text-sm font-medium transition-colors {activeTab === 'results'
         ? 'border-b-2 border-blue-500 text-blue-600'
         : 'text-gray-500 hover:text-gray-700'}"
@@ -65,6 +79,8 @@
     <ModelParametersTab bind:params bind:numRuns />
   {:else if activeTab === 'policy'}
     <PolicyTab {params} bind:policy {running} onRun={runSim} />
+  {:else if activeTab === 'optimizer'}
+    <OptimizerTab {params} onApplyPolicy={applyOptimizedPolicy} />
   {:else}
     <ResultsTab bind:this={resultsTab} {params} {results} />
   {/if}
