@@ -2,51 +2,74 @@
  * Default/initial model parameters for a quick start.
  */
 
-import type { ModelParameters, StaticPolicy } from './types';
+import type { ModelParameters } from './types';
+import { FloatTensor1D, FloatTensor3D, FloatTensor4D } from './tensor';
 
-/** Create default model parameters. */
+/** Create default model parameters matching the updated paper. */
 export function createDefaultParams(): ModelParameters {
-  const T = 60;
-  const r = 10;
-  const C = 30;
-  const W = 5;
+  const T = 30;
+  const r = 3;
+  const A = 2;
+  const C = 20;
+  const W = 3;
+  const tauMax = 5;
 
-  // Uniform arrival: each tier has 0.1 probability per period
-  const p = Array.from({ length: r }, () => new Array(T).fill(0.1));
+  // Poisson arrival rate: ~2 students per period
+  const lambda = new FloatTensor1D(T);
+  for (let t = 0; t < T; t++) lambda.set(t, 2.0);
 
-  // Low dropout probability
-  const lambda = Array.from({ length: r }, () => new Array(T).fill(0.05));
-
-  // Accept/reject probabilities: higher tiers are pickier (lower accept)
-  // theta[i][t][w-1]
-  const theta: number[][][] = [];
-  const mu: number[][][] = [];
-
+  // Arrival distribution: uniform across (i, a) buckets
+  const pi = new FloatTensor3D(r, A, T);
+  const uniformProb = 1 / (r * A);
   for (let i = 0; i < r; i++) {
-    theta.push([]);
-    mu.push([]);
-    for (let t = 0; t < T; t++) {
-      theta[i].push([]);
-      mu[i].push([]);
-      for (let w = 0; w < W; w++) {
-        if (w === 0) {
-          // w=1 (last period): must decide. Higher tiers accept with lower prob.
-          const acceptProb = 0.7 - 0.1 * i;
-          theta[i][t].push(acceptProb);
-          mu[i][t].push(1 - acceptProb); // boundary: theta + mu = 1 when w=1
-        } else {
-          // w > 1: some remain undecided
-          theta[i][t].push(0.3);
-          mu[i][t].push(0.1);
+    for (let a = 0; a < A; a++) {
+      for (let t = 0; t < T; t++) {
+        pi.set(i, a, t, uniformProb);
+      }
+    }
+  }
+
+  // Dropout probability: increases with tenure, slightly higher for lower tiers
+  const delta = new FloatTensor4D(r, A, T, tauMax);
+  for (let i = 0; i < r; i++) {
+    for (let a = 0; a < A; a++) {
+      for (let t = 0; t < T; t++) {
+        for (let tau = 0; tau < tauMax; tau++) {
+          // Base rate 0.05, +0.02 per tenure period, +0.02 for lower tiers
+          const rate = 0.05 + 0.02 * tau + 0.02 * (r - 1 - i) / Math.max(r - 1, 1);
+          delta.set(i, a, t, tau, Math.min(rate, 0.5));
         }
       }
     }
   }
 
-  return { T, r, C, W, p, lambda, theta, mu };
-}
+  // Accept probability: higher tiers are pickier
+  const theta = new FloatTensor4D(r, A, T, W);
+  const mu = new FloatTensor4D(r, A, T, W);
 
-/** Create a default static policy (zeros — no offers). */
-export function createDefaultStaticPolicy(T: number, r: number): StaticPolicy {
-  return Array.from({ length: T }, () => new Array(r).fill(0));
+  for (let i = 0; i < r; i++) {
+    for (let a = 0; a < A; a++) {
+      for (let t = 0; t < T; t++) {
+        for (let w = 0; w < W; w++) {
+          if (w === 0) {
+            // Last period (w=1 remaining): must decide
+            const acceptProb = 0.7 - 0.15 * i / Math.max(r - 1, 1);
+            theta.set(i, a, t, w, acceptProb);
+            mu.set(i, a, t, w, 1 - acceptProb);
+          } else {
+            // Still has time: partial decision
+            theta.set(i, a, t, w, 0.25);
+            mu.set(i, a, t, w, 0.1);
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    T, r, A, C, W, tauMax,
+    lambda, pi, delta, theta, mu,
+    phi: 1.0,
+    psi: 10.0,
+  };
 }

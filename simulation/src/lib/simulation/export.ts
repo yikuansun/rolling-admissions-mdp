@@ -1,38 +1,73 @@
 /**
- * Export simulation results to CSV spreadsheet format.
+ * Export simulation results to CSV spreadsheet format (v2).
  */
 
 import type { SimulationResult, ModelParameters } from './types';
+import { IntTensor2D, IntTensor3D } from './tensor';
 
 /**
  * Generate CSV content from a simulation result.
- * Columns: Period, Action (per tier), State m (per tier), State n (per tier), Outstanding offers (per tier, summed across w)
+ * Long format: one row per period with aggregated state info.
  */
 export function exportToCSV(result: SimulationResult, params: ModelParameters): string {
-  const { r } = params;
+  const { r, A, W, tauMax } = params;
   const headers: string[] = ['Period'];
 
-  for (let i = 0; i < r; i++) headers.push(`Action_Tier${i + 1}`);
+  // Action summary: total offers per tier
+  for (let i = 0; i < r; i++) headers.push(`Offers_Tier${i + 1}`);
+  // Matriculated per tier
   for (let i = 0; i < r; i++) headers.push(`Matriculated_Tier${i + 1}`);
+  // Waitlist per tier (summed over attrs and tenure)
   for (let i = 0; i < r; i++) headers.push(`Waitlist_Tier${i + 1}`);
-  for (let i = 0; i < r; i++) headers.push(`OutstandingOffers_Tier${i + 1}`);
-  headers.push('RemainingCapacity');
+  // Matriculated per attribute
+  for (let a = 0; a < A; a++) headers.push(`Matriculated_Attr${a + 1}`);
+
+  headers.push('TotalMatriculated', 'RemainingCapacity');
 
   const rows: string[] = [headers.join(',')];
 
   for (const record of result.periods) {
-    const row: (string | number)[] = [record.period + 1]; // 1-indexed display
+    const row: (string | number)[] = [record.period + 1];
 
-    for (let i = 0; i < r; i++) row.push(record.action[i]);
-    for (let i = 0; i < r; i++) row.push(record.stateAfter.m[i]);
-    for (let i = 0; i < r; i++) row.push(record.stateAfter.n[i]);
+    // Reconstruct tensors for after-state
+    const M = new IntTensor2D(r, A, record.M_after);
+    const N = new IntTensor3D(r, A, tauMax, record.N_after);
+    const actionT = new IntTensor3D(r, A, tauMax, record.action);
+
+    // Offers per tier
     for (let i = 0; i < r; i++) {
-      const totalOffers = record.stateAfter.O[i].reduce((a, b) => a + b, 0);
-      row.push(totalOffers);
+      let sum = 0;
+      for (let a = 0; a < A; a++) {
+        for (let tau = 0; tau < tauMax; tau++) sum += actionT.get(i, a, tau);
+      }
+      row.push(sum);
     }
 
-    const remaining = params.C - record.stateAfter.m.reduce((a, b) => a + b, 0);
-    row.push(remaining);
+    // Matriculated per tier
+    for (let i = 0; i < r; i++) {
+      let sum = 0;
+      for (let a = 0; a < A; a++) sum += M.get(i, a);
+      row.push(sum);
+    }
+
+    // Waitlist per tier
+    for (let i = 0; i < r; i++) {
+      let sum = 0;
+      for (let a = 0; a < A; a++) {
+        for (let tau = 0; tau < tauMax; tau++) sum += N.get(i, a, tau);
+      }
+      row.push(sum);
+    }
+
+    // Matriculated per attribute
+    for (let a = 0; a < A; a++) {
+      let sum = 0;
+      for (let i = 0; i < r; i++) sum += M.get(i, a);
+      row.push(sum);
+    }
+
+    const totalM = M.sum();
+    row.push(totalM, params.C - totalM);
 
     rows.push(row.join(','));
   }

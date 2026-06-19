@@ -1,105 +1,75 @@
 /**
- * CSV import/export utilities for model parameters and policy rules.
+ * CSV import/export utilities for model parameters and policy rules (v2).
  *
- * Matrix CSVs (arrival probs, dropout probs) use format:
- *   Header row: Tier\Period, 1, 2, 3, ...
- *   Data rows:  Tier 1, 0.1, 0.1, 0.1, ...
+ * Matrix CSVs use format:
+ *   Header row: Row\Col, 1, 2, 3, ...
+ *   Data rows:  Label, val, val, val, ...
  *
  * Policy rules CSV uses format:
- *   Header row: Priority, Tier, Min Waitlist, Min Capacity, Offers to Extend
- *   Data rows:  1, 3, 1, 1, 1
+ *   Header: Priority, Tier, Attribute, Min Waitlist, Min Capacity, Offers to Extend
  */
 
 import type { PolicyRule } from './types';
 
-// --- Matrix CSV (for p and lambda) ---
+// --- Generic 2D matrix CSV ---
 
 /**
- * Generate a CSV template for a tier×period matrix.
- * @param r Number of tiers
- * @param T Number of periods
- * @param defaultValue Default cell value
- * @param label Label for the matrix (used in header comment)
+ * Generate CSV from a 2D number array (rows × cols).
  */
-export function generateMatrixTemplate(r: number, T: number, defaultValue: number, label: string): string {
+export function matrixToCSV(
+  matrix: number[][],
+  rowLabels: string[],
+  colLabels: string[],
+): string {
   const rows: string[] = [];
-
-  // Header
-  const header = ['Tier\\Period', ...Array.from({ length: T }, (_, t) => `${t + 1}`)];
-  rows.push(header.join(','));
-
-  // Data rows
-  for (let i = 0; i < r; i++) {
-    const row = [`Tier ${i + 1}`, ...Array.from({ length: T }, () => `${defaultValue}`)];
-    rows.push(row.join(','));
+  rows.push(['', ...colLabels].join(','));
+  for (let i = 0; i < matrix.length; i++) {
+    rows.push([rowLabels[i] ?? `Row ${i + 1}`, ...matrix[i].map(v => `${v}`)].join(','));
   }
-
   return rows.join('\n');
 }
 
 /**
- * Generate a CSV from an existing tier×period matrix.
+ * Parse a CSV string into a 2D number array.
  */
-export function matrixToCSV(matrix: number[][], r: number, T: number): string {
-  const rows: string[] = [];
-
-  const header = ['Tier\\Period', ...Array.from({ length: T }, (_, t) => `${t + 1}`)];
-  rows.push(header.join(','));
-
-  for (let i = 0; i < r; i++) {
-    const values = Array.from({ length: T }, (_, t) => `${matrix[i]?.[t] ?? 0}`);
-    rows.push([`Tier ${i + 1}`, ...values].join(','));
-  }
-
-  return rows.join('\n');
-}
-
-/**
- * Parse a CSV string into a tier×period matrix.
- * Returns null if parsing fails.
- */
-export function parseMatrixCSV(csv: string): { matrix: number[][]; r: number; T: number } | null {
+export function parseMatrixCSV(csv: string): { matrix: number[][]; rows: number; cols: number } | null {
   const lines = csv.trim().split(/\r?\n/).filter(line => line.trim() !== '');
   if (lines.length < 2) return null;
 
-  // Parse header to determine T
   const headerCells = parseCsvLine(lines[0]);
-  const T = headerCells.length - 1; // first cell is label
-  if (T < 1) return null;
+  const cols = headerCells.length - 1;
+  if (cols < 1) return null;
 
   const matrix: number[][] = [];
-
   for (let i = 1; i < lines.length; i++) {
     const cells = parseCsvLine(lines[i]);
-    // First cell is the row label, rest are values
     const values: number[] = [];
-    for (let j = 1; j <= T; j++) {
+    for (let j = 1; j <= cols; j++) {
       const val = parseFloat(cells[j] ?? '0');
       values.push(isNaN(val) ? 0 : val);
     }
     matrix.push(values);
   }
 
-  return { matrix, r: matrix.length, T };
+  return { matrix, rows: matrix.length, cols };
 }
 
 // --- Policy Rules CSV ---
 
 /**
- * Generate a CSV template for policy rules.
+ * Generate a CSV for policy rules.
  */
 export function generatePolicyRulesTemplate(rules: PolicyRule[]): string {
   const rows: string[] = [];
-
-  rows.push('Priority,Tier,Min Waitlist,Min Capacity,Offers to Extend');
+  rows.push('Priority,Tier,Attribute,Min Waitlist,Min Capacity,Offers to Extend');
 
   if (rules.length === 0) {
-    // Provide a sample row
-    rows.push('1,1,1,1,1');
+    rows.push('1,1,-1,1,1,1');
   } else {
     for (let i = 0; i < rules.length; i++) {
       const rule = rules[i];
-      rows.push(`${i + 1},${rule.tier + 1},${rule.minWaitlist},${rule.minCapacity},${rule.offersToExtend}`);
+      // Display 1-indexed tier, keep attribute as-is (-1 = any)
+      rows.push(`${i + 1},${rule.tier + 1},${rule.attribute === -1 ? 'Any' : rule.attribute + 1},${rule.minWaitlist},${rule.minCapacity},${rule.offersToExtend}`);
     }
   }
 
@@ -107,8 +77,7 @@ export function generatePolicyRulesTemplate(rules: PolicyRule[]): string {
 }
 
 /**
- * Parse a CSV string into policy rules.
- * Returns null if parsing fails.
+ * Parse policy rules from CSV.
  */
 export function parsePolicyRulesCSV(csv: string): PolicyRule[] | null {
   const lines = csv.trim().split(/\r?\n/).filter(line => line.trim() !== '');
@@ -118,17 +87,19 @@ export function parsePolicyRulesCSV(csv: string): PolicyRule[] | null {
 
   for (let i = 1; i < lines.length; i++) {
     const cells = parseCsvLine(lines[i]);
-    if (cells.length < 5) continue;
+    if (cells.length < 6) continue;
 
-    const tier = parseInt(cells[1], 10) - 1; // Convert 1-indexed to 0-indexed
-    const minWaitlist = parseInt(cells[2], 10);
-    const minCapacity = parseInt(cells[3], 10);
-    const offersToExtend = parseInt(cells[4], 10);
+    const tier = parseInt(cells[1], 10) - 1; // 1-indexed to 0-indexed
+    const attrStr = cells[2].trim().toLowerCase();
+    const attribute = (attrStr === 'any' || attrStr === '-1') ? -1 : parseInt(cells[2], 10) - 1;
+    const minWaitlist = parseInt(cells[3], 10);
+    const minCapacity = parseInt(cells[4], 10);
+    const offersToExtend = parseInt(cells[5], 10);
 
     if (isNaN(tier) || isNaN(minWaitlist) || isNaN(minCapacity) || isNaN(offersToExtend)) continue;
     if (tier < 0) continue;
 
-    rules.push({ tier, minWaitlist, minCapacity, offersToExtend });
+    rules.push({ tier, attribute, minWaitlist, minCapacity, offersToExtend });
   }
 
   return rules.length > 0 ? rules : null;

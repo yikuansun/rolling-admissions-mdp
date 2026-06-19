@@ -18,35 +18,6 @@
   let running: boolean = $state(false);
   let resultsTab: ResultsTab | undefined = $state(undefined);
 
-  // When T, r, or W changes, rebuild dependent arrays
-  function rebuildArrays() {
-    params.p = Array.from({ length: params.r }, (_, i) =>
-      Array.from({ length: params.T }, (_, t) => params.p[i]?.[t] ?? 0.1)
-    );
-    params.lambda = Array.from({ length: params.r }, (_, i) =>
-      Array.from({ length: params.T }, (_, t) => params.lambda[i]?.[t] ?? 0.05)
-    );
-    params.theta = Array.from({ length: params.r }, (_, i) =>
-      Array.from({ length: params.T }, (_, t) =>
-        Array.from({ length: params.W }, (_, w) =>
-          params.theta[i]?.[t]?.[w] ?? (w === 0 ? 0.7 - 0.1 * i : 0.3)
-        )
-      )
-    );
-    params.mu = Array.from({ length: params.r }, (_, i) =>
-      Array.from({ length: params.T }, (_, t) =>
-        Array.from({ length: params.W }, (_, w) =>
-          params.mu[i]?.[t]?.[w] ?? (w === 0 ? 0.3 + 0.1 * i : 0.1)
-        )
-      )
-    );
-
-    // Rebuild rule policy: filter out rules referencing tiers that no longer exist
-    if (policy.kind === 'rules') {
-      policy.rules = policy.rules.filter(r => r.tier < params.r);
-    }
-  }
-
   function runSim() {
     running = true;
     setTimeout(() => {
@@ -58,7 +29,7 @@
   }
 </script>
 
-<div class="max-w-5xl mx-auto p-6 font-sans">
+<div class="max-w-6xl mx-auto p-6 font-sans">
   <h1 class="text-2xl font-bold mb-4">Rolling Admissions MDP — Monte Carlo Simulator</h1>
 
   <!-- Tab bar -->
@@ -91,7 +62,7 @@
 
   <!-- Tab content -->
   {#if activeTab === 'params'}
-    <ModelParametersTab bind:params bind:numRuns onRebuild={rebuildArrays} />
+    <ModelParametersTab bind:params bind:numRuns />
   {:else if activeTab === 'policy'}
     <PolicyTab {params} bind:policy {running} onRun={runSim} />
   {:else}

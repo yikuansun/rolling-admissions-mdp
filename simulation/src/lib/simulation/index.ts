@@ -1,3 +1,4 @@
+export * from './tensor';
 export * from './types';
 export * from './engine';
 export * from './export';
