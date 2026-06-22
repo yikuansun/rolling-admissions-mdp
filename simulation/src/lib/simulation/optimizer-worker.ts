@@ -1,6 +1,9 @@
 /**
  * Web Worker for running the genetic algorithm optimizer in a background thread.
  *
+ * Uses an async generation loop (yielding via setTimeout between generations)
+ * so that incoming 'stop' messages can be processed mid-run.
+ *
  * Messages IN:
  *   { type: 'start', params: SerializedModelParameters, config: OptimizerConfig }
  *   { type: 'stop' }
@@ -14,8 +17,17 @@
 import { deserializeParams } from './serialization';
 import type { SerializedModelParameters } from './serialization';
 import type { OptimizerConfig } from './optimizer';
-import { runOptimization, decodeGenome, type GenerationReport } from './optimizer';
-import type { PolicyRule } from './types';
+import {
+  initPopulation,
+  getGeneBounds,
+  evaluateFitness,
+  tournamentSelect,
+  crossover,
+  mutate,
+  decodeGenome,
+  type Individual,
+} from './optimizer';
+import type { ModelParameters, PolicyRule } from './types';
 
 let stopRequested = false;
 
@@ -31,27 +43,81 @@ self.onmessage = (e: MessageEvent) => {
     stopRequested = false;
     const params = deserializeParams(msg.params as SerializedModelParameters);
     const config = msg.config as OptimizerConfig;
-
-    const onGeneration = (report: GenerationReport) => {
-      self.postMessage({
-        type: 'progress',
-        generation: report.generation,
-        bestFitness: report.bestFitness,
-        avgFitness: report.avgFitness,
-        bestGenes: Array.from(report.bestGenes),
-      });
-    };
-
-    const shouldStop = () => stopRequested;
-
-    const bestPolicy = runOptimization(params, config, onGeneration, shouldStop);
-
-    if (stopRequested) {
-      self.postMessage({ type: 'stopped' });
-    } else {
-      // Send back the best policy rules
-      const rules: PolicyRule[] = bestPolicy.kind === 'rules' ? bestPolicy.rules : [];
-      self.postMessage({ type: 'complete', bestPolicy: rules });
-    }
+    runGA(params, config);
   }
 };
+
+/**
+ * Run the GA with async yielding between generations.
+ */
+function runGA(params: ModelParameters, config: OptimizerConfig) {
+  const { populationSize, generations, simsPerEval, eliteFraction, mutationRate, mutationSigma } = config;
+  const bounds = getGeneBounds(params);
+  const eliteCount = Math.max(1, Math.floor(populationSize * eliteFraction));
+
+  let population = initPopulation(populationSize, bounds);
+
+  // Evaluate initial population
+  for (const ind of population) {
+    ind.fitness = evaluateFitness(ind, params, simsPerEval);
+  }
+
+  let bestEver: Individual = { genes: new Float64Array(bounds.length), fitness: -Infinity };
+  let gen = 0;
+
+  function runNextGeneration() {
+    // Check stop
+    if (stopRequested) {
+      self.postMessage({ type: 'stopped' });
+      return;
+    }
+
+    if (gen >= generations) {
+      // Done — send final result
+      const bestPolicy = decodeGenome(bestEver.genes, params);
+      const rules: PolicyRule[] = bestPolicy.kind === 'rules' ? bestPolicy.rules : [];
+      self.postMessage({ type: 'complete', bestPolicy: rules });
+      return;
+    }
+
+    // Sort by fitness descending
+    population.sort((a, b) => b.fitness - a.fitness);
+
+    // Track best
+    if (population[0].fitness > bestEver.fitness) {
+      bestEver = { genes: population[0].genes.slice(), fitness: population[0].fitness };
+    }
+
+    // Report progress
+    const avgFitness = population.reduce((s, ind) => s + ind.fitness, 0) / populationSize;
+    self.postMessage({
+      type: 'progress',
+      generation: gen,
+      bestFitness: population[0].fitness,
+      avgFitness,
+      bestGenes: Array.from(population[0].genes),
+    });
+
+    // Selection + reproduction
+    const elites = population.slice(0, eliteCount);
+    const newPop: Individual[] = elites.map(e => ({ genes: e.genes.slice(), fitness: e.fitness }));
+
+    while (newPop.length < populationSize) {
+      const p1 = tournamentSelect(population);
+      const p2 = tournamentSelect(population);
+      const child = crossover(p1, p2);
+      mutate(child, mutationRate, mutationSigma, bounds);
+      child.fitness = evaluateFitness(child, params, simsPerEval);
+      newPop.push(child);
+    }
+
+    population = newPop;
+    gen++;
+
+    // Yield to event loop so 'stop' messages can be processed
+    setTimeout(runNextGeneration, 0);
+  }
+
+  // Kick off the first generation
+  setTimeout(runNextGeneration, 0);
+}
