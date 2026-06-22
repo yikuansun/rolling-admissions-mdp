@@ -1,21 +1,11 @@
 /**
- * CSV import/export utilities for model parameters and policy rules (v2).
- *
- * Matrix CSVs use format:
- *   Header row: Row\Col, 1, 2, 3, ...
- *   Data rows:  Label, val, val, val, ...
- *
- * Policy rules CSV uses format:
- *   Header: Priority, Tier, Attribute, Min Waitlist, Min Capacity, Offers to Extend
+ * CSV import/export utilities for model parameters and policy (v3).
  */
 
-import type { PolicyRule } from './types';
+import type { TierPeriodParams } from './types';
 
 // --- Generic 2D matrix CSV ---
 
-/**
- * Generate CSV from a 2D number array (rows × cols).
- */
 export function matrixToCSV(
   matrix: number[][],
   rowLabels: string[],
@@ -29,9 +19,6 @@ export function matrixToCSV(
   return rows.join('\n');
 }
 
-/**
- * Parse a CSV string into a 2D number array.
- */
 export function parseMatrixCSV(csv: string): { matrix: number[][]; rows: number; cols: number } | null {
   const lines = csv.trim().split(/\r?\n/).filter(line => line.trim() !== '');
   if (lines.length < 2) return null;
@@ -54,60 +41,8 @@ export function parseMatrixCSV(csv: string): { matrix: number[][]; rows: number;
   return { matrix, rows: matrix.length, cols };
 }
 
-// --- Policy Rules CSV ---
-
-/**
- * Generate a CSV for policy rules.
- */
-export function generatePolicyRulesTemplate(rules: PolicyRule[]): string {
-  const rows: string[] = [];
-  rows.push('Priority,Tier,Attribute,Min Waitlist,Min Capacity,Offers to Extend');
-
-  if (rules.length === 0) {
-    rows.push('1,1,-1,1,1,1');
-  } else {
-    for (let i = 0; i < rules.length; i++) {
-      const rule = rules[i];
-      // Display 1-indexed tier, keep attribute as-is (-1 = any)
-      rows.push(`${i + 1},${rule.tier + 1},${rule.attribute === -1 ? 'Any' : rule.attribute + 1},${rule.minWaitlist},${rule.minCapacity},${rule.offersToExtend}`);
-    }
-  }
-
-  return rows.join('\n');
-}
-
-/**
- * Parse policy rules from CSV.
- */
-export function parsePolicyRulesCSV(csv: string): PolicyRule[] | null {
-  const lines = csv.trim().split(/\r?\n/).filter(line => line.trim() !== '');
-  if (lines.length < 2) return null;
-
-  const rules: PolicyRule[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const cells = parseCsvLine(lines[i]);
-    if (cells.length < 6) continue;
-
-    const tier = parseInt(cells[1], 10) - 1; // 1-indexed to 0-indexed
-    const attrStr = cells[2].trim().toLowerCase();
-    const attribute = (attrStr === 'any' || attrStr === '-1') ? -1 : parseInt(cells[2], 10) - 1;
-    const minWaitlist = parseInt(cells[3], 10);
-    const minCapacity = parseInt(cells[4], 10);
-    const offersToExtend = parseInt(cells[5], 10);
-
-    if (isNaN(tier) || isNaN(minWaitlist) || isNaN(minCapacity) || isNaN(offersToExtend)) continue;
-    if (tier < 0) continue;
-
-    rules.push({ tier, attribute, minWaitlist, minCapacity, offersToExtend });
-  }
-
-  return rules.length > 0 ? rules : null;
-}
-
 // --- Utilities ---
 
-/** Parse a single CSV line, handling quoted fields. */
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
   let current = '';

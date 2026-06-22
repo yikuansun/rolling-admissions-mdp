@@ -2,48 +2,42 @@
  * Policy evaluation: converts Policy definitions into executable PolicyFn functions.
  */
 
-import type { ModelParameters, State, Action, Policy, PolicyFn, PolicyRule, RulePolicy } from './types';
+import type { ModelParameters, State, Action, Policy, PolicyFn, MatrixPolicy, TierPeriodParams } from './types';
 import { IntTensor3D } from './tensor';
 import { remainingCapacity } from './engine';
 
 /**
- * Evaluate a rule-based policy against the current state.
- * Rules are evaluated in order. For each (tier, attribute) bucket,
- * the first matching rule determines the action.
+ * Evaluate a matrix (per-period) policy at period t.
+ * For each tier (highest first), check if conditions are met and extend offers.
  */
-function evaluateRulePolicy(rules: PolicyRule[], state: State, params: ModelParameters): Action {
+function evaluateMatrixPolicy(policy: MatrixPolicy, state: State, t: number, params: ModelParameters): Action {
   const { r, A, tauMax, C } = params;
   const action = new IntTensor3D(r, A, tauMax);
   const cap = remainingCapacity(state, C);
 
-  // Track which (tier, attr) buckets have been matched
-  const matched = new Uint8Array(r * A);
+  // Evaluate from highest tier first (priority)
+  for (let i = r - 1; i >= 0; i--) {
+    const tierParams = policy.tiers[i];
+    if (!tierParams) continue;
 
-  for (const rule of rules) {
-    const { tier, attribute, minWaitlist, minCapacity, offersToExtend } = rule;
-    if (tier < 0 || tier >= r) continue;
+    const minWaitlist = tierParams.minWaitlist[t] ?? 0;
+    const minCapacity = tierParams.minCapacity[t] ?? 0;
+    const offersToExtend = tierParams.offersToExtend[t] ?? 0;
+
+    if (offersToExtend <= 0) continue;
     if (cap < minCapacity) continue;
 
-    // Determine which attributes this rule applies to
-    const attrStart = attribute === -1 ? 0 : attribute;
-    const attrEnd = attribute === -1 ? A : attribute + 1;
-
-    for (let a = attrStart; a < attrEnd; a++) {
-      if (a < 0 || a >= A) continue;
-      const matchIdx = tier * A + a;
-      if (matched[matchIdx]) continue;
-
-      // Sum waitlist across all tenures for this (tier, attr) bucket
-      const totalWaitlist = state.N.sumSlice(tier, a);
+    // Apply to all attribute combinations
+    for (let a = 0; a < A; a++) {
+      const totalWaitlist = state.N.sumSlice(i, a);
       if (totalWaitlist < minWaitlist) continue;
 
-      // Rule fires: distribute offers from lowest tenure first
-      matched[matchIdx] = 1;
+      // Distribute offers from lowest tenure first
       let toOffer = Math.min(offersToExtend, totalWaitlist);
       for (let tau = 0; tau < tauMax && toOffer > 0; tau++) {
-        const available = state.N.get(tier, a, tau);
+        const available = state.N.get(i, a, tau);
         const take = Math.min(toOffer, available);
-        action.set(tier, a, tau, take);
+        action.set(i, a, tau, take);
         toOffer -= take;
       }
     }
@@ -56,10 +50,9 @@ function evaluateRulePolicy(rules: PolicyRule[], state: State, params: ModelPara
  * Convert a Policy definition into a PolicyFn that the engine can call each period.
  */
 export function compilePolicyFn(policy: Policy): PolicyFn {
-  if (policy.kind === 'rules') {
-    const { rules } = policy;
+  if (policy.kind === 'matrix') {
     return (state: State, t: number, params: ModelParameters): Action => {
-      return evaluateRulePolicy(rules, state, params);
+      return evaluateMatrixPolicy(policy, state, t, params);
     };
   }
 
@@ -67,18 +60,15 @@ export function compilePolicyFn(policy: Policy): PolicyFn {
   return (_state, _t, params) => new IntTensor3D(params.r, params.A, params.tauMax);
 }
 
-/** Create a default rule-based policy for quick start. */
-export function createDefaultRulePolicy(r: number): RulePolicy {
-  const rules: PolicyRule[] = [];
-  // Default: for each tier (highest first), offer 1 if waitlist >= 1 and capacity >= 1
-  for (let i = r - 1; i >= 0; i--) {
-    rules.push({
-      tier: i,
-      attribute: -1, // any attribute
-      minWaitlist: 1,
-      minCapacity: 1,
-      offersToExtend: 1,
+/** Create a default matrix policy (offer 1 per tier if waitlist >= 1 and cap >= 1). */
+export function createDefaultMatrixPolicy(r: number, T: number): MatrixPolicy {
+  const tiers: TierPeriodParams[] = [];
+  for (let i = 0; i < r; i++) {
+    tiers.push({
+      minWaitlist: new Array(T).fill(1),
+      minCapacity: new Array(T).fill(1),
+      offersToExtend: new Array(T).fill(1),
     });
   }
-  return { kind: 'rules', rules };
+  return { kind: 'matrix', tiers };
 }

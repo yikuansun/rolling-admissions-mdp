@@ -1,14 +1,13 @@
 /**
  * Genetic Algorithm optimizer for policy search.
  *
- * Genome encoding (fixed-length):
- *   One rule per tier, each with 3 genes: [minWaitlist, minCapacity, offersToExtend]
- *   Total genome length = r * 3
- *   All rules use attribute = -1 (any).
- *   Rules are ordered highest tier first (priority).
+ * Genome encoding (per-period matrix):
+ *   For each tier (highest first), for each period t:
+ *     [minWaitlist_t, minCapacity_t, offersToExtend_t]
+ *   Total genome length = r * T * 3
  */
 
-import type { ModelParameters, Policy, PolicyRule, SimulationResult } from './types';
+import type { ModelParameters, Policy, TierPeriodParams } from './types';
 import { runMonteCarloSimulations } from './engine';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -39,60 +38,75 @@ export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
   generations: 100,
   simsPerEval: 50,
   eliteFraction: 0.2,
-  mutationRate: 0.3,
-  mutationSigma: 2.0,
+  mutationRate: 0.15,
+  mutationSigma: 1.5,
 };
 
 // ─── Genome ↔ Policy conversion ─────────────────────────────────────────────
 
+/**
+ * Genome layout: for tier idx (0 = highest tier, r-1 = lowest tier):
+ *   base = idx * T * 3
+ *   For each period t:
+ *     genes[base + t*3 + 0] = minWaitlist
+ *     genes[base + t*3 + 1] = minCapacity
+ *     genes[base + t*3 + 2] = offersToExtend
+ */
+
 /** Get gene bounds for given model params. Returns [min, max] per gene. */
 export function getGeneBounds(params: ModelParameters): [number, number][] {
+  const { r, T, C } = params;
   const bounds: [number, number][] = [];
-  for (let i = 0; i < params.r; i++) {
-    bounds.push([0, 20]);        // minWaitlist
-    bounds.push([0, params.C]);  // minCapacity
-    bounds.push([0, params.C]);  // offersToExtend
+  for (let idx = 0; idx < r; idx++) {
+    for (let t = 0; t < T; t++) {
+      bounds.push([0, 15]);       // minWaitlist
+      bounds.push([0, C]);        // minCapacity
+      bounds.push([0, C]);        // offersToExtend
+    }
   }
   return bounds;
 }
 
-/** Decode a genome into a Policy. */
+/** Decode a genome into a MatrixPolicy. */
 export function decodeGenome(genes: Float64Array, params: ModelParameters): Policy {
-  const rules: PolicyRule[] = [];
-  // Highest tier first (priority ordering)
-  for (let idx = 0; idx < params.r; idx++) {
-    const tier = params.r - 1 - idx; // highest tier first
-    const base = idx * 3;
-    rules.push({
-      tier,
-      attribute: -1,
-      minWaitlist: Math.max(0, Math.round(genes[base])),
-      minCapacity: Math.max(0, Math.round(genes[base + 1])),
-      offersToExtend: Math.max(0, Math.round(genes[base + 2])),
-    });
+  const { r, T } = params;
+  const tiers: TierPeriodParams[] = new Array(r);
+
+  for (let idx = 0; idx < r; idx++) {
+    const tier = r - 1 - idx; // highest tier first in genome
+    const base = idx * T * 3;
+    const minWaitlist = new Array(T);
+    const minCapacity = new Array(T);
+    const offersToExtend = new Array(T);
+
+    for (let t = 0; t < T; t++) {
+      minWaitlist[t] = Math.max(0, Math.round(genes[base + t * 3 + 0]));
+      minCapacity[t] = Math.max(0, Math.round(genes[base + t * 3 + 1]));
+      offersToExtend[t] = Math.max(0, Math.round(genes[base + t * 3 + 2]));
+    }
+
+    tiers[tier] = { minWaitlist, minCapacity, offersToExtend };
   }
-  return { kind: 'rules', rules };
+
+  return { kind: 'matrix', tiers };
 }
 
-/** Encode a Policy into a genome (inverse of decodeGenome). */
+/** Encode a MatrixPolicy into a genome. */
 export function encodePolicy(policy: Policy, params: ModelParameters): Float64Array {
-  const genes = new Float64Array(params.r * 3);
-  if (policy.kind !== 'rules') return genes;
+  const { r, T } = params;
+  const genes = new Float64Array(r * T * 3);
+  if (policy.kind !== 'matrix') return genes;
 
-  // Map rules by tier
-  const byTier = new Map<number, PolicyRule>();
-  for (const rule of policy.rules) {
-    if (!byTier.has(rule.tier)) byTier.set(rule.tier, rule);
-  }
+  for (let idx = 0; idx < r; idx++) {
+    const tier = r - 1 - idx;
+    const tierParams = policy.tiers[tier];
+    const base = idx * T * 3;
+    if (!tierParams) continue;
 
-  for (let idx = 0; idx < params.r; idx++) {
-    const tier = params.r - 1 - idx;
-    const rule = byTier.get(tier);
-    const base = idx * 3;
-    if (rule) {
-      genes[base] = rule.minWaitlist;
-      genes[base + 1] = rule.minCapacity;
-      genes[base + 2] = rule.offersToExtend;
+    for (let t = 0; t < T; t++) {
+      genes[base + t * 3 + 0] = tierParams.minWaitlist[t] ?? 0;
+      genes[base + t * 3 + 1] = tierParams.minCapacity[t] ?? 0;
+      genes[base + t * 3 + 2] = tierParams.offersToExtend[t] ?? 0;
     }
   }
   return genes;
@@ -148,12 +162,10 @@ export function mutate(
 ): void {
   for (let i = 0; i < individual.genes.length; i++) {
     if (Math.random() < rate) {
-      // Box-Muller for normal sample
       const u1 = Math.random();
       const u2 = Math.random();
       const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
       individual.genes[i] += z * sigma;
-      // Clamp
       const [lo, hi] = bounds[i];
       individual.genes[i] = Math.max(lo, Math.min(hi, individual.genes[i]));
     }
@@ -167,16 +179,8 @@ export function tournamentSelect(population: Individual[]): Individual {
   return a.fitness >= b.fitness ? a : b;
 }
 
-// ─── Main GA Loop ───────────────────────────────────────────────────────────
+// ─── Main GA Loop (kept for non-worker usage) ───────────────────────────────
 
-/**
- * Run the full GA optimization.
- * @param params Model parameters
- * @param config Optimizer configuration
- * @param onGeneration Callback after each generation (for progress reporting)
- * @param shouldStop Function that returns true if optimization should abort
- * @returns The best policy found
- */
 export function runOptimization(
   params: ModelParameters,
   config: OptimizerConfig,
@@ -187,10 +191,7 @@ export function runOptimization(
   const bounds = getGeneBounds(params);
   const eliteCount = Math.max(1, Math.floor(populationSize * eliteFraction));
 
-  // Initialize
   let population = initPopulation(populationSize, bounds);
-
-  // Evaluate initial population
   for (const ind of population) {
     ind.fitness = evaluateFitness(ind, params, simsPerEval);
   }
@@ -200,28 +201,17 @@ export function runOptimization(
   for (let gen = 0; gen < generations; gen++) {
     if (shouldStop?.()) break;
 
-    // Sort by fitness descending
     population.sort((a, b) => b.fitness - a.fitness);
-
-    // Track best
     if (population[0].fitness > bestEver.fitness) {
       bestEver = { genes: population[0].genes.slice(), fitness: population[0].fitness };
     }
 
-    // Report
     const avgFitness = population.reduce((s, ind) => s + ind.fitness, 0) / populationSize;
-    onGeneration?.({
-      generation: gen,
-      bestFitness: population[0].fitness,
-      avgFitness,
-      bestGenes: population[0].genes.slice(),
-    });
+    onGeneration?.({ generation: gen, bestFitness: population[0].fitness, avgFitness, bestGenes: population[0].genes.slice() });
 
-    // Selection + reproduction
     const elites = population.slice(0, eliteCount);
-    const newPop: Individual[] = [...elites.map(e => ({ genes: e.genes.slice(), fitness: e.fitness }))];
+    const newPop: Individual[] = elites.map(e => ({ genes: e.genes.slice(), fitness: e.fitness }));
 
-    // Fill remaining with crossover + mutation
     while (newPop.length < populationSize) {
       const p1 = tournamentSelect(population);
       const p2 = tournamentSelect(population);
@@ -234,11 +224,7 @@ export function runOptimization(
     population = newPop;
   }
 
-  // Final sort
   population.sort((a, b) => b.fitness - a.fitness);
-  if (population[0].fitness > bestEver.fitness) {
-    bestEver = population[0];
-  }
-
+  if (population[0].fitness > bestEver.fitness) bestEver = population[0];
   return decodeGenome(bestEver.genes, params);
 }

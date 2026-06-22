@@ -138,31 +138,29 @@ export interface SimulationResult {
 // ─── Policy ─────────────────────────────────────────────────────────────────
 
 /**
- * A single threshold-based policy rule (updated for multi-attribute model).
- * "If waitlist for bucket (tier, attribute) >= minWaitlist
- *  AND remaining capacity >= minCapacity, offer `offersToExtend` slots."
+ * Per-period threshold parameters for a single tier.
+ * thresholds[t] = { minWaitlist, minCapacity, offersToExtend } at period t.
  */
-export interface PolicyRule {
-  /** Tier index (0-based) */
-  tier: number;
-  /** Attribute index (0-based), or -1 for "any attribute" */
-  attribute: number;
-  /** Minimum total waitlist count for this (tier, attr) bucket to trigger */
-  minWaitlist: number;
-  /** Minimum remaining capacity required */
-  minCapacity: number;
-  /** Number of offers to extend when rule fires */
-  offersToExtend: number;
+export interface TierPeriodParams {
+  minWaitlist: number[];   // length T
+  minCapacity: number[];   // length T
+  offersToExtend: number[]; // length T
 }
 
-/** A rule-based policy. */
-export interface RulePolicy {
-  kind: 'rules';
-  rules: PolicyRule[];
+/**
+ * A time-dependent matrix policy.
+ * For each tier, defines per-period threshold parameters.
+ * Applied to all attribute combinations (attribute = -1 semantics).
+ * Tiers are ordered highest-first for priority.
+ */
+export interface MatrixPolicy {
+  kind: 'matrix';
+  /** Per-tier parameters, indexed by tier (0-based). Length = r. */
+  tiers: TierPeriodParams[];
 }
 
 /** Union type for policy representations. */
-export type Policy = RulePolicy;
+export type Policy = MatrixPolicy;
 
 /**
  * A policy function that maps (state, period, params) -> action tensor.

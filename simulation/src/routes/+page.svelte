@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     createDefaultParams,
-    createDefaultRulePolicy,
+    createDefaultMatrixPolicy,
     runMonteCarloSimulations,
   } from '$lib/simulation';
   import type { ModelParameters, Policy, SimulationResult } from '$lib/simulation';
@@ -13,7 +13,7 @@
   // --- State ---
   let activeTab: 'params' | 'policy' | 'results' | 'optimizer' = $state('params');
   let params: ModelParameters = $state(createDefaultParams());
-  let policy: Policy = $state(createDefaultRulePolicy(params.r));
+  let policy: Policy = $state(createDefaultMatrixPolicy(params.r, params.T));
   let numRuns: number = $state(100);
   let results: SimulationResult[] = $state([]);
   let running: boolean = $state(false);

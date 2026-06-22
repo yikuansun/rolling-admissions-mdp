@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ModelParameters, Policy, PolicyRule } from '$lib/simulation';
+  import type { ModelParameters, Policy, TierPeriodParams } from '$lib/simulation';
   import {
     DEFAULT_OPTIMIZER_CONFIG,
     decodeGenome,
@@ -20,7 +20,7 @@
   let currentGen: number = $state(0);
   let bestFitness: number = $state(0);
   let avgFitness: number = $state(0);
-  let bestPolicy: PolicyRule[] | null = $state(null);
+  let bestPolicyDecoded: Policy | null = $state(null);
   let fitnessHistory: { gen: number; best: number; avg: number }[] = $state([]);
   let worker: Worker | null = null;
 
@@ -34,10 +34,9 @@
     currentGen = 0;
     bestFitness = 0;
     avgFitness = 0;
-    bestPolicy = null;
+    bestPolicyDecoded = null;
     fitnessHistory = [];
 
-    // Create worker
     worker = new Worker(
       new URL('$lib/simulation/optimizer-worker.ts', import.meta.url),
       { type: 'module' }
@@ -58,17 +57,17 @@
 
         // Decode current best for preview
         const genes = new Float64Array(msg.bestGenes);
-        const policy = decodeGenome(genes, params);
-        if (policy.kind === 'rules') {
-          bestPolicy = policy.rules;
-        }
-
+        bestPolicyDecoded = decodeGenome(genes, params);
         updateChart();
       }
 
       if (msg.type === 'complete') {
         running = false;
-        bestPolicy = msg.bestPolicy;
+        // Decode the final best from the worker's genes
+        if (msg.bestGenes) {
+          const genes = new Float64Array(msg.bestGenes);
+          bestPolicyDecoded = decodeGenome(genes, params);
+        }
         updateChart();
         worker?.terminate();
         worker = null;
@@ -113,13 +112,12 @@
   }
 
   function applyBestPolicy() {
-    if (!bestPolicy) return;
-    onApplyPolicy({ kind: 'rules', rules: bestPolicy });
+    if (!bestPolicyDecoded) return;
+    onApplyPolicy(bestPolicyDecoded);
   }
 
   function updateChart() {
     if (!chartCanvas || fitnessHistory.length === 0) return;
-
     if (chartInstance) chartInstance.destroy();
 
     chartInstance = new Chart(chartCanvas, {
@@ -131,7 +129,6 @@
             label: 'Best Fitness',
             data: fitnessHistory.map(h => h.best),
             borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
             fill: false,
             tension: 0.2,
             pointRadius: 0,
@@ -140,7 +137,6 @@
             label: 'Avg Fitness',
             data: fitnessHistory.map(h => h.avg),
             borderColor: '#9ca3af',
-            backgroundColor: 'rgba(156, 163, 175, 0.1)',
             fill: false,
             tension: 0.2,
             pointRadius: 0,
@@ -161,7 +157,6 @@
 
   $effect(() => {
     return () => {
-      // Cleanup on unmount
       if (worker) { worker.terminate(); worker = null; }
       if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
     };
@@ -171,8 +166,8 @@
 <div>
   <h2 class="text-lg font-semibold mb-2">Policy Optimizer (Genetic Algorithm)</h2>
   <p class="text-sm text-gray-600 mb-4">
-    Searches for the best threshold-based policy by evolving a population of candidates
-    and evaluating each via Monte Carlo simulation.
+    Evolves a per-period policy matrix ({params.r} tiers × {params.T} periods × 3 parameters = {params.r * params.T * 3} genes).
+    Each candidate is evaluated via Monte Carlo simulation.
   </p>
 
   <!-- Configuration -->
@@ -181,27 +176,27 @@
       Configuration
     </summary>
     <div class="grid grid-cols-2 gap-3 mt-2 max-w-md">
-      <label class="text-sm text-gray-600">Population Size</label>
+      <span class="text-sm text-gray-600">Population Size</span>
       <input type="number" min="10" max="500" class="border rounded px-2 py-1 text-sm w-24"
         bind:value={config.populationSize} disabled={running} />
 
-      <label class="text-sm text-gray-600">Generations</label>
+      <span class="text-sm text-gray-600">Generations</span>
       <input type="number" min="5" max="1000" class="border rounded px-2 py-1 text-sm w-24"
         bind:value={config.generations} disabled={running} />
 
-      <label class="text-sm text-gray-600">Sims per Evaluation</label>
+      <span class="text-sm text-gray-600">Sims per Evaluation</span>
       <input type="number" min="10" max="500" class="border rounded px-2 py-1 text-sm w-24"
         bind:value={config.simsPerEval} disabled={running} />
 
-      <label class="text-sm text-gray-600">Elite Fraction</label>
+      <span class="text-sm text-gray-600">Elite Fraction</span>
       <input type="number" min="0.05" max="0.5" step="0.05" class="border rounded px-2 py-1 text-sm w-24"
         bind:value={config.eliteFraction} disabled={running} />
 
-      <label class="text-sm text-gray-600">Mutation Rate</label>
+      <span class="text-sm text-gray-600">Mutation Rate</span>
       <input type="number" min="0.05" max="1" step="0.05" class="border rounded px-2 py-1 text-sm w-24"
         bind:value={config.mutationRate} disabled={running} />
 
-      <label class="text-sm text-gray-600">Mutation Strength (σ)</label>
+      <span class="text-sm text-gray-600">Mutation Strength (σ)</span>
       <input type="number" min="0.1" max="10" step="0.1" class="border rounded px-2 py-1 text-sm w-24"
         bind:value={config.mutationSigma} disabled={running} />
     </div>
@@ -211,15 +206,13 @@
   <div class="flex gap-3 mb-4">
     <button
       class="bg-purple-600 text-white px-5 py-2 rounded font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
-      onclick={startOptimization}
-      disabled={running}
+      onclick={startOptimization} disabled={running}
     >
       ▶ Start Optimization
     </button>
     <button
       class="bg-red-500 text-white px-5 py-2 rounded font-medium hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
-      onclick={stopOptimization}
-      disabled={!running}
+      onclick={stopOptimization} disabled={!running}
     >
       ■ Stop
     </button>
@@ -233,15 +226,14 @@
         <span>Best: <strong>{bestFitness.toFixed(3)}</strong></span>
         <span>Avg: <strong>{avgFitness.toFixed(3)}</strong></span>
       </div>
-      <!-- Progress bar -->
       <div class="w-full bg-gray-200 rounded-full h-2">
-        <div
-          class="bg-purple-500 h-2 rounded-full transition-all"
-          style="width: {Math.round((currentGen / config.generations) * 100)}%"
-        ></div>
+        <div class="bg-purple-500 h-2 rounded-full transition-all"
+          style="width: {Math.round((currentGen / config.generations) * 100)}%"></div>
       </div>
       {#if running}
-        <p class="text-xs text-gray-500 mt-1">Running... total sims: ~{currentGen * config.populationSize * config.simsPerEval}</p>
+        <p class="text-xs text-gray-500 mt-1">
+          Genome size: {params.r * params.T * 3} genes | ~{currentGen * config.populationSize * config.simsPerEval} sims completed
+        </p>
       {/if}
     </div>
   {/if}
@@ -254,18 +246,35 @@
     </div>
   {/if}
 
-  <!-- Best policy found -->
-  {#if bestPolicy && bestPolicy.length > 0}
+  <!-- Best policy preview -->
+  {#if bestPolicyDecoded && bestPolicyDecoded.kind === 'matrix'}
     <div class="p-4 bg-green-50 border border-green-200 rounded">
       <h3 class="text-sm font-semibold text-green-800 mb-2">Best Policy Found (Z = {bestFitness.toFixed(3)})</h3>
-      <div class="space-y-1 text-sm text-green-900 mb-3">
-        {#each bestPolicy as rule, idx}
-          <div>
-            <span class="text-green-600">{idx + 1}.</span>
-            Tier {rule.tier + 1}{rule.attribute === -1 ? '' : `, Attr ${rule.attribute + 1}`}:
-            waitlist ≥ {rule.minWaitlist}, capacity ≥ {rule.minCapacity} → offer {rule.offersToExtend}
-          </div>
-        {/each}
+      <div class="text-xs text-green-900 mb-3 overflow-x-auto">
+        <table class="border border-green-200 text-center">
+          <thead>
+            <tr class="bg-green-100">
+              <th class="p-1 border-r border-green-200">Tier</th>
+              <th class="p-1" colspan={params.T}>Offers to Extend per Period</th>
+            </tr>
+            <tr class="bg-green-50">
+              <th class="p-1 border-r border-green-200"></th>
+              {#each Array(params.T) as _, t}
+                <th class="p-1 min-w-6">{t + 1}</th>
+              {/each}
+            </tr>
+          </thead>
+          <tbody>
+            {#each bestPolicyDecoded.tiers as tierParams, i}
+              <tr class="border-t border-green-200">
+                <td class="p-1 border-r border-green-200 font-medium">{i + 1}</td>
+                {#each tierParams.offersToExtend as val}
+                  <td class="p-1 {val > 0 ? 'bg-green-100 font-medium' : ''}">{val}</td>
+                {/each}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
       <button
         class="bg-green-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-green-700"

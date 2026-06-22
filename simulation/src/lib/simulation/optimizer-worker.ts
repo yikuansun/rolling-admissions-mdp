@@ -24,10 +24,9 @@ import {
   tournamentSelect,
   crossover,
   mutate,
-  decodeGenome,
   type Individual,
 } from './optimizer';
-import type { ModelParameters, PolicyRule } from './types';
+import type { ModelParameters } from './types';
 
 let stopRequested = false;
 
@@ -73,10 +72,8 @@ function runGA(params: ModelParameters, config: OptimizerConfig) {
     }
 
     if (gen >= generations) {
-      // Done — send final result
-      const bestPolicy = decodeGenome(bestEver.genes, params);
-      const rules: PolicyRule[] = bestPolicy.kind === 'rules' ? bestPolicy.rules : [];
-      self.postMessage({ type: 'complete', bestPolicy: rules });
+      // Done — send final best genes for decoding on main thread
+      self.postMessage({ type: 'complete', bestGenes: Array.from(bestEver.genes) });
       return;
     }
 
