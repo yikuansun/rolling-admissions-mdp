@@ -97,6 +97,8 @@
       eliteFraction: config.eliteFraction,
       mutationRate: config.mutationRate,
       mutationSigma: config.mutationSigma,
+      immigrationInterval: config.immigrationInterval,
+      immigrationFraction: config.immigrationFraction,
     };
     worker.postMessage({
       type: 'start',
@@ -199,6 +201,14 @@
       <span class="text-sm text-gray-600">Mutation Strength (σ)</span>
       <input type="number" min="0.1" max="10" step="0.1" class="border rounded px-2 py-1 text-sm w-24"
         bind:value={config.mutationSigma} disabled={running} />
+
+      <span class="text-sm text-gray-600">Immigration Interval</span>
+      <input type="number" min="0" max="100" class="border rounded px-2 py-1 text-sm w-24"
+        bind:value={config.immigrationInterval} disabled={running} />
+
+      <span class="text-sm text-gray-600">Immigration Fraction</span>
+      <input type="number" min="0.05" max="0.5" step="0.05" class="border rounded px-2 py-1 text-sm w-24"
+        bind:value={config.immigrationFraction} disabled={running} />
     </div>
   </details>
 

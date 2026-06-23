@@ -50,9 +50,11 @@ self.onmessage = (e: MessageEvent) => {
  * Run the GA with async yielding between generations.
  */
 function runGA(params: ModelParameters, config: OptimizerConfig) {
-  const { populationSize, generations, simsPerEval, eliteFraction, mutationRate, mutationSigma } = config;
+  const { populationSize, generations, simsPerEval, eliteFraction, mutationRate, mutationSigma,
+    immigrationInterval, immigrationFraction } = config;
   const bounds = getGeneBounds(params);
   const eliteCount = Math.max(1, Math.floor(populationSize * eliteFraction));
+  const immigrantCount = Math.max(1, Math.floor(populationSize * immigrationFraction));
 
   let population = initPopulation(populationSize, bounds);
 
@@ -94,6 +96,18 @@ function runGA(params: ModelParameters, config: OptimizerConfig) {
       avgFitness,
       bestGenes: Array.from(population[0].genes),
     });
+
+    // Immigration shock: replace bottom individuals with random immigrants
+    if (immigrationInterval > 0 && gen > 0 && gen % immigrationInterval === 0) {
+      const immigrants = initPopulation(immigrantCount, bounds);
+      for (const imm of immigrants) {
+        imm.fitness = evaluateFitness(imm, params, simsPerEval);
+      }
+      // Replace the worst individuals (population is already sorted descending)
+      for (let i = 0; i < immigrantCount; i++) {
+        population[populationSize - 1 - i] = immigrants[i];
+      }
+    }
 
     // Selection + reproduction
     const elites = population.slice(0, eliteCount);

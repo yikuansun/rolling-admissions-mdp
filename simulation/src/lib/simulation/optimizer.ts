@@ -19,6 +19,10 @@ export interface OptimizerConfig {
   eliteFraction: number;
   mutationRate: number;
   mutationSigma: number;
+  /** Every N generations, inject random immigrants. 0 = disabled. */
+  immigrationInterval: number;
+  /** Fraction of population to replace with immigrants (0–1). */
+  immigrationFraction: number;
 }
 
 export interface Individual {
@@ -40,6 +44,8 @@ export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
   eliteFraction: 0.2,
   mutationRate: 0.15,
   mutationSigma: 1.5,
+  immigrationInterval: 10,
+  immigrationFraction: 0.2,
 };
 
 // ─── Genome ↔ Policy conversion ─────────────────────────────────────────────
