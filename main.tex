@@ -34,9 +34,10 @@ Students are partitioned into $r \times A$ distinct buckets. To preserve high-fi
     \item \textbf{Waitlist ($\mathbf{N}_t \in \mathbb{N}_0^{r \times A \times \tau_{\max}}$):} Counts of applicants who have applied but have not yet been extended an offer, partitioned by tier $i$, attribute combination $a$, and the number of periods the applicant has spent on the waitlist $\tau \in \Set{1, \dots, \tau_{\max}}$.
     \item \textbf{Matriculated Students ($\mathbf{M}_t \in \mathbb{N}_0^{r \times A}$):} Counts of students who have received an offer and accepted it, tracked by tier $i$ and attribute combination $a$.
     \item \textbf{Outstanding Offers ($\mathbf{O}_t \in \mathbb{N}_0^{r \times A \times W}$):} Counts of pending offers, partitioned by tier $i$, attribute combination $a$, and remaining decision periods $w \in \{1, \dots, W\}$.
+    \item \textbf{Extension Requests ($\mathbf{R}_t \in \mathbb{N}_0^{r \times A}$):} Counts of students who reached their decision deadline ($w=1$) in the previous period and have submitted a request for a deadline extension, partitioned by tier $i$ and attribute combination $a$.
 \end{itemize}
 
-We assume the initial state $\mathbf{N}_0 = \mathbf{M}_0 = \mathbf{O}_0 = \mathbf{0}$. At any time $t$, the state of the system is uniquely described by the tuple $S_t = (\mathbf{M}_t, \mathbf{N}_t, \mathbf{O}_t)$. The remaining physical capacity of the incoming class is denoted by $c_t = C - \sum_{i=1}^r \sum_{a=1}^A m_{i, a, t}$, where $C$ is the institution's total capacity target.
+We assume the initial state $\mathbf{N}_0 = \mathbf{M}_0 = \mathbf{O}_0 = \mathbf{R}_0 = \mathbf{0}$. At any time $t$, the state of the system is uniquely described by the tuple $S_t = (\mathbf{M}_t, \mathbf{N}_t, \mathbf{O}_t, \mathbf{R}_t)$. The remaining physical capacity of the incoming class is denoted by $c_t = C - \sum_{i=1}^r \sum_{a=1}^A m_{i, a, t}$, where $C$ is the institution's total capacity target.
 
 \section{Time-Dependent Transition Probabilities}
 
@@ -63,11 +64,8 @@ New applicants always enter the waitlist with an initial tenure of $\tau = 1$.
         \item \textbf{Reject} the offer (or let it expire) with probability $\mu_{i, a}(t, w)$,
         \item \textbf{Remain undecided} with probability $1 - \theta_{i, a}(t, w) - \mu_{i, a}(t, w)$.
     \end{itemize}
-    Because students cannot remain undecided once the decision window expires, we enforce the hard boundary constraint:
-    \[
-    \theta_{i, a}(t, 1) + \mu_{i, a}(t, 1) = 1 \quad \forall i, \forall a, \forall t
-    \]
-    For all periods with remaining validity ($w > 1$), the probability of remaining undecided is strictly non-negative, implying $\theta_{i, a}(t, w) + \mu_{i, a}(t, w) \leq 1$.
+    At the last period of the response window ($w = 1$), the student can no longer ``Remain undecided." Instead, we give the student the opportunity to request an extension. We let $\epsilon_{i, a}(t) = 1 - \theta_{i, a}(t, 1) - \mu_{i, a}(t, 1)$ denote the probability that the student will submit an extension request.
+    
 \end{itemize}
 
 \section{Timeline and Action Constraints}
@@ -84,18 +82,22 @@ Within each period $t$, events occur in the following precise chronological orde
     \end{cases}
     \]
     
-    \item \textbf{Decision Phase:} The school observes the post-arrival state $S_t' = (\mathbf{M}_t, \mathbf{N}_t', \mathbf{O}_t)$ and selects an admission action matrix $\mathbf{K}_t \in \mathbb{N}_0^{r \times A \times \tau_{\max}}$, where $k_{i, a, \tau, t}$ is the number of offers extended to waitlist applicants in bucket $(i, a, \tau)$. The chosen action must belong to the feasible action space $\mathcal{K}(S_t)$, defined by structural and capacity boundaries:
+    \item \textbf{Decision Phase:} The school observes the post-arrival state $S_t' = (\mathbf{M}_t, \mathbf{N}_t', \mathbf{O}_t, \mathbf{R}_t)$ and selects an admission-extension pair $(\mathbf{K}_t, \mathbf{G}_t)$. The admission matrix is denoted as $\mathbf{K}_t \in \mathbb{N}_0^{r \times A \times \tau_{\max}}$, where $k_{i, a, \tau, t}$ is the number of offers extended to waitlist applicants in bucket $(i, a, \tau)$. The extension-granting matrix is denoted as $\mathbf{G}_t \in \mathbb{N}_0^{r \times A}$, where $g_{i, a, t}$ is the number of extension requests to grant to students in $\mathbf{R}_t$. Let $\mathcal{K}(S_t)$ denote the set of possible values for $\mathbf{K}_t$ and $\mathcal{G}(S_t)$ denote the set of possible values for $\mathbf{G}_t$. Due to structural and capacity constraints, we have:
     \[
     \mathcal{K}(S_t) = \Set{\mathbf{K}_t \in \mathbb{N}_0^{r \times A \times \tau_{\max}} \;\middle|\; k_{i, a, \tau, t} \leq n_{i, a, \tau, t}' \;\; \forall i, a, \tau, \text{ and } \sum_{i, a, \tau} k_{i, a, \tau, t} \leq c_t}
     \]
+    \[
+        \mathcal{G}(S_t) = \Set{\mathbf{G}_t \in \mathbb{N}_0^{r \times A} \; \middle| \; g_{i, a, t} \leq r_{i, a, t} \;\; \forall i, a}
+    \]
     The state variables are immediately modified to their intermediate, post-decision values:
     \begin{itemize}
-        \item Post-decision waitlist: $\tilde{n}_{i, a, \tau, t} = n_{i, a, \tau, t}' - k_{i, a, \tau, t}$
-        \item Post-decision offers at maximum window: All newly extended offers enter at the full horizon $W$:
+        \item \textbf{Post-decision waitlist:} $\tilde{n}_{i, a, \tau, t} = n_{i, a, \tau, t}' - k_{i, a, \tau, t}$
+        \item \textbf{Post-decision offers:} Newly extended offers, as well as granted extensions, enter at the full horizon $W$:
         \[
-        \tilde{o}_{i, a, W, t} = o_{i, a, W, t} + \sum_{\tau=1}^{\tau_{\max}} k_{i, a, \tau, t}
+        \tilde{o}_{i, a, W, t} = o_{i, a, W, t} + \sum_{\tau=1}^{\tau_{\max}} k_{i, a, \tau, t} + g_{i, a, t}
         \]
         For all shorter horizons $w < W$, the outstanding offer counts remain unaltered: $\tilde{o}_{i, a, w, t} = o_{i, a, w, t}$.
+        \item \textbf{Post-decision extension requests:} Since extension requests only have one period of validity, we reset after $\mathbf{R}_t$ each stage: $\tilde{\mathbf{R}}_t = \mathbf{0}$.
     \end{itemize}
 
     \item \textbf{Stochastic Response Phase:} 
@@ -119,23 +121,25 @@ n_{i, a, \tau+1, t+1} \sim \Binomial(\tilde{n}_{i, a, \tau, t}, \, 1 - \delta_{i
 Note that any student reaching $\tau > \tau_{\max}$ is automatically cleared from the system due to expiration. New arrivals at $t+1$ will populate the $\tau = 1$ boundary slice.
 
 \subsection{Outstanding Offer Decisions}
-For each tier $i$, attribute combination $a$, and remaining validity window $w \in \left\{1, \dots, W\right\}$, the pool of post-decision outstanding offers $\tilde{o}_{i, a, w, t}$ splits into three disjoint components:
+For each tier $i$, attribute combination $a$, the pool of post-decision outstanding offers $\tilde{o}_{i, a, w, t}$ splits stochastically based on the remaining validity window $w$:
+
 \begin{itemize}
-    \item $A_{i, a, t}^w$: The number of students who accept the offer at time $t$,
-    \item $R_{i, a, t}^w$: The number of students who reject (or let expire) the offer at time $t$,
-    \item $U_{i, a, t}^w$: The number of students who remain undecided at time $t$.
+    \item \textbf{Mid-Cycle Validity ($w > 1$):} The outstanding offers split into acceptances ($A_{i, a, t}^w$), rejections ($R_{i, a, t}^w$), and candidates who remain undecided ($U_{i, a, t}^w$) via a cell-wise Multinomial draw:
+    \[
+    \left(A_{i, a, t}^w,\ R_{i, a, t}^w,\ U_{i, a, t}^w\right) \sim \Multinomial\left(\tilde{o}_{i, a, w, t}, \ [\theta_{i, a}(t, w), \, \mu_{i, a}(t, w), \, 1 - \theta_{i, a}(t, w) - \mu_{i, a}(t, w)]\right)
+    \]
+
+    \item \textbf{Expiring Validity ($w = 1$):} Because candidates cannot remain undecided past the deadline, the pool splits into acceptances ($A_{i, a, t}^1$), outright expirations/rejections ($R_{i, a, t}^1$), and newly submitted extension requests ($E_{i, a, t}$):
+    \[
+    \left(A_{i, a, t}^1,\ R_{i, a, t}^1,\ E_{i, a, t}\right) \sim \Multinomial\left(\tilde{o}_{i, a, 1, t}, \ [\theta_{i, a}(t, 1), \, \mu_{i, a}(t, 1), \, \epsilon_{i, a}(t)]\right)
+    \]
 \end{itemize}
-These outcomes are jointly simulated via a cell-wise Multinomial draw:
-\[
-\left(A_{i, a, t}^w,\ R_{i, a, t}^w,\ U_{i, a, t}^w\right) \sim \Multinomial\left(\tilde{o}_{i, a, w, t}, \ [\theta_{i, a}(t, w), \, \mu_{i, a}(t, w), \, 1 - \theta_{i, a}(t, w) - \mu_{i, a}(t, w)]\right)
-\]
 
 \subsection{State Progression to $t + 1$}
 Once the stochastic variables are sampled, the components for period $t+1$ are compiled. The matriculation matrix accounts for all new acceptances across outstanding valid horizons:
 \[
 m_{i, a, t+1} = m_{i, a, t} + \sum_{w = 1}^W A_{i, a, t}^w \quad \forall i, \forall a
 \]
-
 The outstanding offer matrix updates by decrementing the undecided segments down by one validity horizon. For all $i \in \left\{1, \dots, r\right\}$ and $a \in \left\{1, \dots, A\right\}$, the elements progress as:
 \[
 o_{i, a, w, t + 1} = \begin{cases}
@@ -143,6 +147,11 @@ o_{i, a, w, t + 1} = \begin{cases}
     0 & \text{if } w = W.
 \end{cases}
 \]
+The extension request matrix for the next period is populated entirely by the newly generated requests emerging from the expiring $w=1$ cohort of the current period:
+\[
+    r_{i, a, t+1} = E_{i, a, t} \quad \forall i, \forall a
+    \]
+    Any un-granted requests from the current period ($\tilde{r}_{i, a, t}$) naturally drop out of the system because they do not carry forward into this transition equation.
 
 \section{Objective Function}
 
