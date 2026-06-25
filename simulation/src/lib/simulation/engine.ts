@@ -1,11 +1,10 @@
 /**
- * Monte Carlo simulation engine for the Rolling Admissions MDP (v2).
+ * Monte Carlo simulation engine for the Rolling Admissions MDP (v3).
  *
- * Uses flat typed-array tensors for high-performance computation.
  * Implements the stochastic transition dynamics:
  * 1. Arrival Phase (Poisson + Multinomial)
- * 2. Decision Phase (apply policy action)
- * 3. Stochastic Response Phase (waitlist dropouts + offer responses)
+ * 2. Decision Phase (apply policy action K + grant extensions G)
+ * 3. Stochastic Response Phase (waitlist dropouts + offer responses + extension requests)
  * 4. Clock tick (offers age down, waitlist tenure advances)
  */
 
@@ -22,6 +21,7 @@ export function createInitialState(params: ModelParameters): State {
     M: new IntTensor2D(params.r, params.A),
     N: new IntTensor3D(params.r, params.A, params.tauMax),
     O: new IntTensor3D(params.r, params.A, params.W),
+    R: new IntTensor2D(params.r, params.A),
   };
 }
 
@@ -31,6 +31,7 @@ export function cloneState(s: State): State {
     M: s.M.clone(),
     N: s.N.clone(),
     O: s.O.clone(),
+    R: s.R.clone(),
   };
 }
 
@@ -42,19 +43,16 @@ export function remainingCapacity(state: State, C: number): number {
 // ─── Period simulation ──────────────────────────────────────────────────────
 
 /**
- * Simulate a single period transition (mutates `state` in place for performance).
- * Returns the state after transition.
+ * Simulate a single period transition (mutates `state` in place).
+ * @returns Number of extensions granted this period.
  */
-export function simulatePeriodInPlace(state: State, t: number, action: Action, params: ModelParameters): void {
+export function simulatePeriodInPlace(state: State, t: number, action: Action, params: ModelParameters, autoGrantExtensions: boolean): number {
   const { r, A, W, tauMax } = params;
 
   // --- 1. Arrival Phase ---
-  // Sample total arrivals from Poisson(lambda(t))
   const totalArrivals = samplePoisson(params.lambda.get(t));
 
   if (totalArrivals > 0) {
-    // Distribute arrivals across (i, a) buckets via multinomial
-    // Build cumulative probabilities for this period
     const bucketCount = r * A;
     const probs = new Float64Array(bucketCount);
     for (let i = 0; i < r; i++) {
@@ -62,23 +60,18 @@ export function simulatePeriodInPlace(state: State, t: number, action: Action, p
         probs[i * A + a] = params.pi.get(i, a, t);
       }
     }
-
-    // Sample multinomial
     const arrivals = sampleMultinomialGeneral(totalArrivals, probs);
-
-    // Add arrivals to waitlist at τ=0 (tenure index 0 = tenure 1)
     for (let i = 0; i < r; i++) {
       for (let a = 0; a < A; a++) {
         const count = arrivals[i * A + a];
-        if (count > 0) {
-          state.N.add(i, a, 0, count);
-        }
+        if (count > 0) state.N.add(i, a, 0, count);
       }
     }
   }
 
   // --- 2. Decision Phase ---
-  // Apply action: move students from waitlist to offers at max window
+
+  // 2a. Apply action K: move students from waitlist to offers at max window
   for (let i = 0; i < r; i++) {
     for (let a = 0; a < A; a++) {
       for (let tau = 0; tau < tauMax; tau++) {
@@ -88,17 +81,31 @@ export function simulatePeriodInPlace(state: State, t: number, action: Action, p
         const actual = Math.min(k, available);
         if (actual <= 0) continue;
         state.N.add(i, a, tau, -actual);
-        state.O.add(i, a, W - 1, actual); // W-1 = max window slot
+        state.O.add(i, a, W - 1, actual);
       }
     }
   }
 
+  // 2b. Grant extensions G: move from R to O at max window
+  let extensionsGranted = 0;
+  if (autoGrantExtensions) {
+    for (let i = 0; i < r; i++) {
+      for (let a = 0; a < A; a++) {
+        const requests = state.R.get(i, a);
+        if (requests > 0) {
+          state.O.add(i, a, W - 1, requests);
+          extensionsGranted += requests;
+        }
+      }
+    }
+  }
+  // Clear R (consumed this period regardless of grant decision)
+  state.R.fill(0);
+
   // --- 3. Stochastic Response Phase ---
 
   // 3a. Waitlist dropouts + tenure advancement
-  // We need a temporary buffer for the next-period waitlist
   const nextN = new IntTensor3D(r, A, tauMax);
-
   for (let i = 0; i < r; i++) {
     for (let a = 0; a < A; a++) {
       for (let tau = 0; tau < tauMax; tau++) {
@@ -106,17 +113,16 @@ export function simulatePeriodInPlace(state: State, t: number, action: Action, p
         if (count <= 0) continue;
         const survivalProb = 1 - params.delta.get(i, a, t, tau);
         const survived = sampleBinomial(count, survivalProb);
-        // Survived students advance to tau+1 (if within bounds)
         if (survived > 0 && tau + 1 < tauMax) {
           nextN.add(i, a, tau + 1, survived);
         }
-        // Students at tauMax-1 that survive are dropped (auto-expiration)
       }
     }
   }
 
   // 3b. Outstanding offer responses
   const nextO = new IntTensor3D(r, A, W);
+  const nextR = new IntTensor2D(r, A); // extension requests for next period
 
   for (let i = 0; i < r; i++) {
     for (let a = 0; a < A; a++) {
@@ -124,49 +130,58 @@ export function simulatePeriodInPlace(state: State, t: number, action: Action, p
         const count = state.O.get(i, a, w);
         if (count <= 0) continue;
 
-        // w index: 0 = 1 period remaining, w = w+1 periods remaining
-        const periodsRemaining = w + 1;
         const thetaVal = params.theta.get(i, a, t, w);
         const muVal = params.mu.get(i, a, t, w);
+        const residual = Math.max(0, 1 - thetaVal - muVal);
 
-        const [accepts, _rejects, undecided] = sampleMultinomial(count, [thetaVal, muVal, 1 - thetaVal - muVal]);
+        const [accepts, _rejects, undecidedOrExt] = sampleMultinomial(count, [thetaVal, muVal, residual]);
 
-        // Accepts go to matriculated
+        // Accepts → matriculated
         if (accepts > 0) {
           state.M.add(i, a, accepts);
         }
 
-        // Undecided age down: move to w-1 slot
-        if (undecided > 0 && w > 0) {
-          nextO.add(i, a, w - 1, undecided);
+        if (w === 0) {
+          // Expiring offers (w=0 means 1 period remaining):
+          // undecidedOrExt = extension requests (ε probability)
+          if (undecidedOrExt > 0) {
+            nextR.add(i, a, undecidedOrExt);
+          }
+          // No undecided carry-forward for w=0
+        } else {
+          // Mid-cycle: undecided age down to w-1
+          if (undecidedOrExt > 0) {
+            nextO.add(i, a, w - 1, undecidedOrExt);
+          }
         }
-        // If w=0 (last period), undecided = 0 due to boundary constraint
       }
     }
   }
 
   // --- 4. Commit next-period state ---
-  // Replace N and O with the computed next-period values
   state.N.data.set(nextN.data);
   state.O.data.set(nextO.data);
+  state.R.data.set(nextR.data);
+
+  return extensionsGranted;
 }
 
 // ─── Full simulation run ────────────────────────────────────────────────────
 
-/**
- * Run a full simulation from t=0 to t=T.
- */
 export function runSimulation(params: ModelParameters, policy: Policy): SimulationResult {
   const { T, r, A, C } = params;
   const policyFn = compilePolicyFn(policy);
+  const autoGrant = policy.kind === 'matrix' ? policy.autoGrantExtensions : true;
   let state = createInitialState(params);
   const periods: PeriodRecord[] = [];
+  let totalExtensionsGranted = 0;
 
   for (let t = 0; t < T; t++) {
     // Snapshot state before
     const M_before = state.M.data.slice();
     const N_before = state.N.data.slice();
     const O_before = state.O.data.slice();
+    const R_before = state.R.data.slice();
 
     // Evaluate policy
     const action = policyFn(state, t, params);
@@ -178,17 +193,21 @@ export function runSimulation(params: ModelParameters, policy: Policy): Simulati
     const actionData = action.data.slice();
 
     // Simulate period (mutates state)
-    simulatePeriodInPlace(state, t, action, params);
+    const extGranted = simulatePeriodInPlace(state, t, action, params, autoGrant);
+    totalExtensionsGranted += extGranted;
 
     periods.push({
       period: t,
       M_before,
       N_before,
       O_before,
+      R_before,
       action: actionData,
+      extensionsGranted: extGranted,
       M_after: state.M.data.slice(),
       N_after: state.N.data.slice(),
       O_after: state.O.data.slice(),
+      R_after: state.R.data.slice(),
     });
   }
 
@@ -196,7 +215,6 @@ export function runSimulation(params: ModelParameters, policy: Policy): Simulati
   const totalMatriculated = state.M.sum();
   const seatsRemaining = C - totalMatriculated;
 
-  // Quality value
   let qualityValue = 0;
   for (let i = 0; i < r; i++) {
     const qi = (i + 1) / r;
@@ -205,7 +223,6 @@ export function runSimulation(params: ModelParameters, policy: Policy): Simulati
     }
   }
 
-  // Diversity penalty (HHI)
   let diversityPenalty = 0;
   if (totalMatriculated > 0) {
     for (let a = 0; a < A; a++) {
@@ -217,13 +234,10 @@ export function runSimulation(params: ModelParameters, policy: Policy): Simulati
     diversityPenalty *= params.phi;
   }
 
-  // Overbooking penalty
   const overbooked = Math.max(0, totalMatriculated - C);
   const overbookingPenalty = params.psi * overbooked * overbooked;
-
   const totalValue = qualityValue - diversityPenalty - overbookingPenalty;
 
-  // Aggregate stats
   const matriculatedByTier = new Array(r).fill(0);
   for (let i = 0; i < r; i++) {
     for (let a = 0; a < A; a++) matriculatedByTier[i] += state.M.get(i, a);
@@ -244,17 +258,16 @@ export function runSimulation(params: ModelParameters, policy: Policy): Simulati
     totalMatriculated,
     matriculatedByTier,
     matriculatedByAttribute,
+    totalExtensionsGranted,
   };
 }
 
 // ─── Action clamping ────────────────────────────────────────────────────────
 
-/** Clamp action in place to be feasible given current state and capacity. */
 function clampActionInPlace(action: Action, state: State, capacity: number, params: ModelParameters): void {
   const { r, A, tauMax } = params;
   let totalOffers = 0;
 
-  // First pass: clamp each cell to available waitlist
   for (let i = 0; i < r; i++) {
     for (let a = 0; a < A; a++) {
       for (let tau = 0; tau < tauMax; tau++) {
@@ -267,10 +280,8 @@ function clampActionInPlace(action: Action, state: State, capacity: number, para
     }
   }
 
-  // If total exceeds capacity, scale down (prioritize higher tiers)
   if (totalOffers > capacity) {
     let remaining = Math.max(capacity, 0);
-    // Iterate from highest tier down
     for (let i = r - 1; i >= 0; i--) {
       for (let a = 0; a < A; a++) {
         for (let tau = 0; tau < tauMax; tau++) {
@@ -281,18 +292,11 @@ function clampActionInPlace(action: Action, state: State, capacity: number, para
         }
       }
     }
-    // Zero out anything not reached (lower tiers)
-    if (remaining <= 0) {
-      // Already handled by the loop above cutting off
-    }
   }
 }
 
 // ─── Monte Carlo ────────────────────────────────────────────────────────────
 
-/**
- * Run multiple Monte Carlo simulations and return all results.
- */
 export function runMonteCarloSimulations(
   params: ModelParameters,
   policy: Policy,
@@ -307,10 +311,6 @@ export function runMonteCarloSimulations(
 
 // ─── General multinomial sampler ────────────────────────────────────────────
 
-/**
- * Sample from Multinomial(n, probs) where probs has arbitrary length.
- * Returns Int32Array of counts.
- */
 function sampleMultinomialGeneral(n: number, probs: Float64Array): Int32Array {
   const k = probs.length;
   const result = new Int32Array(k);
@@ -327,7 +327,7 @@ function sampleMultinomialGeneral(n: number, probs: Float64Array): Int32Array {
     remaining -= count;
     probRemaining -= probs[j];
   }
-  result[k - 1] = remaining; // Last bucket gets the remainder
+  result[k - 1] = remaining;
 
   return result;
 }

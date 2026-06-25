@@ -70,5 +70,5 @@ export function createDefaultMatrixPolicy(r: number, T: number): MatrixPolicy {
       offersToExtend: new Array(T).fill(1),
     });
   }
-  return { kind: 'matrix', tiers };
+  return { kind: 'matrix', tiers, autoGrantExtensions: true };
 }

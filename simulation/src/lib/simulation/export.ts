@@ -22,7 +22,7 @@ export function exportToCSV(result: SimulationResult, params: ModelParameters): 
   // Matriculated per attribute
   for (let a = 0; a < A; a++) headers.push(`Matriculated_Attr${a + 1}`);
 
-  headers.push('TotalMatriculated', 'RemainingCapacity');
+  headers.push('TotalMatriculated', 'RemainingCapacity', 'ExtensionsGranted');
 
   const rows: string[] = [headers.join(',')];
 
@@ -67,7 +67,7 @@ export function exportToCSV(result: SimulationResult, params: ModelParameters): 
     }
 
     const totalM = M.sum();
-    row.push(totalM, params.C - totalM);
+    row.push(totalM, params.C - totalM, record.extensionsGranted);
 
     rows.push(row.join(','));
   }

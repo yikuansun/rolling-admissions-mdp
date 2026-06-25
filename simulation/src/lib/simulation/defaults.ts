@@ -35,7 +35,6 @@ export function createDefaultParams(): ModelParameters {
     for (let a = 0; a < A; a++) {
       for (let t = 0; t < T; t++) {
         for (let tau = 0; tau < tauMax; tau++) {
-          // Base rate 0.05, +0.02 per tenure period, +0.02 for lower tiers
           const rate = 0.05 + 0.02 * tau + 0.02 * (r - 1 - i) / Math.max(r - 1, 1);
           delta.set(i, a, t, tau, Math.min(rate, 0.5));
         }
@@ -43,7 +42,8 @@ export function createDefaultParams(): ModelParameters {
     }
   }
 
-  // Accept probability: higher tiers are pickier
+  // Accept/reject probabilities
+  // At w=0 (expiring): θ + μ < 1, residual ε is extension request probability
   const theta = new FloatTensor4D(r, A, T, W);
   const mu = new FloatTensor4D(r, A, T, W);
 
@@ -52,12 +52,15 @@ export function createDefaultParams(): ModelParameters {
       for (let t = 0; t < T; t++) {
         for (let w = 0; w < W; w++) {
           if (w === 0) {
-            // Last period (w=1 remaining): must decide
-            const acceptProb = 0.7 - 0.15 * i / Math.max(r - 1, 1);
+            // Expiring offers: θ + μ + ε = 1
+            // Higher tiers more likely to request extensions (pickier, want more time)
+            const acceptProb = 0.5 - 0.1 * i / Math.max(r - 1, 1);
+            const rejectProb = 0.3;
+            // ε (extension request) = 1 - accept - reject = 0.2 + 0.1*(i/(r-1))
             theta.set(i, a, t, w, acceptProb);
-            mu.set(i, a, t, w, 1 - acceptProb);
+            mu.set(i, a, t, w, rejectProb);
           } else {
-            // Still has time: partial decision
+            // Mid-cycle: still has time
             theta.set(i, a, t, w, 0.25);
             mu.set(i, a, t, w, 0.1);
           }

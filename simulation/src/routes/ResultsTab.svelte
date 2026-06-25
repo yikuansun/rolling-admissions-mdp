@@ -20,13 +20,14 @@
     const avgOverbooking = results.reduce((s, r) => s + r.overbookingPenalty, 0) / n;
     const avgSeats = results.reduce((s, r) => s + r.seatsRemaining, 0) / n;
     const avgMatriculated = results.reduce((s, r) => s + r.totalMatriculated, 0) / n;
+    const avgExtensions = results.reduce((s, r) => s + r.totalExtensionsGranted, 0) / n;
     const avgByTier = Array.from({ length: params.r }, (_, i) =>
       results.reduce((s, r) => s + r.matriculatedByTier[i], 0) / n
     );
     const avgByAttr = Array.from({ length: params.A }, (_, a) =>
       results.reduce((s, r) => s + r.matriculatedByAttribute[a], 0) / n
     );
-    return { avgValue, avgQuality, avgDiversity, avgOverbooking, avgSeats, avgMatriculated, avgByTier, avgByAttr };
+    return { avgValue, avgQuality, avgDiversity, avgOverbooking, avgSeats, avgMatriculated, avgExtensions, avgByTier, avgByAttr };
   }
 
   export function renderChart() {
@@ -108,6 +109,10 @@
         <tr class="border-t border-gray-100">
           <td class="p-3 font-medium">Avg. Seats Remaining</td>
           <td class="p-3">{agg.avgSeats.toFixed(2)}</td>
+        </tr>
+        <tr class="border-t border-gray-100">
+          <td class="p-3 font-medium">Avg. Extensions Granted</td>
+          <td class="p-3">{agg.avgExtensions.toFixed(2)}</td>
         </tr>
         {#each agg.avgByTier as val, i}
           <tr class="border-t border-gray-100">

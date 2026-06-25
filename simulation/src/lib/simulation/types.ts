@@ -1,11 +1,12 @@
 /**
- * Types for the Rolling Admissions MDP simulation (v2).
+ * Types for the Rolling Admissions MDP simulation (v3).
  *
  * Matches the updated paper with:
  * - Quality tiers (r) × Attribute combinations (A)
  * - Tenure-tracked waitlist (τ_max)
  * - Poisson arrivals with multinomial bucket assignment
  * - 4D probability tensors
+ * - Extension requests (R tensor)
  */
 
 import type { IntTensor2D, IntTensor3D, FloatTensor1D, FloatTensor3D, FloatTensor4D } from './tensor';
@@ -35,7 +36,6 @@ export interface ModelParameters {
 
   /**
    * Arrival distribution probabilities: π(i, a, t).
-   * Probability that an arriving student falls into bucket (i, a) at time t.
    * Shape: [r, A, T]. For each t: sum over (i, a) = 1.
    */
   pi: FloatTensor3D;
@@ -49,6 +49,8 @@ export interface ModelParameters {
   /**
    * Offer accept probability: θ(i, a, t, w).
    * Shape: [r, A, T, W]
+   * Note: at w=0 (1 period remaining), θ + μ ≤ 1. Residual ε = 1 - θ - μ is
+   * the probability of requesting an extension.
    */
   theta: FloatTensor4D;
 
@@ -87,6 +89,13 @@ export interface State {
    * Shape: [r, A, W]
    */
   O: IntTensor3D;
+
+  /**
+   * Extension requests: R(i, a).
+   * Students who reached w=1, didn't accept/reject, and submitted an extension request.
+   * Shape: [r, A]
+   */
+  R: IntTensor2D;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -106,12 +115,16 @@ export interface PeriodRecord {
   M_before: Int32Array;
   N_before: Int32Array;
   O_before: Int32Array;
+  R_before: Int32Array;
   /** Serialized action */
   action: Int32Array;
+  /** Number of extensions granted this period */
+  extensionsGranted: number;
   /** Serialized state after transition */
   M_after: Int32Array;
   N_after: Int32Array;
   O_after: Int32Array;
+  R_after: Int32Array;
 }
 
 /** Results of a single simulation run. */
@@ -133,30 +146,32 @@ export interface SimulationResult {
   matriculatedByTier: number[];
   /** Matriculated by attribute: sum over tiers */
   matriculatedByAttribute: number[];
+  /** Total extensions granted across all periods */
+  totalExtensionsGranted: number;
 }
 
 // ─── Policy ─────────────────────────────────────────────────────────────────
 
 /**
  * Per-period threshold parameters for a single tier.
- * thresholds[t] = { minWaitlist, minCapacity, offersToExtend } at period t.
  */
 export interface TierPeriodParams {
-  minWaitlist: number[];   // length T
-  minCapacity: number[];   // length T
+  minWaitlist: number[];    // length T
+  minCapacity: number[];    // length T
   offersToExtend: number[]; // length T
 }
 
 /**
  * A time-dependent matrix policy.
  * For each tier, defines per-period threshold parameters.
- * Applied to all attribute combinations (attribute = -1 semantics).
- * Tiers are ordered highest-first for priority.
+ * Extensions are auto-granted (Option A for now).
  */
 export interface MatrixPolicy {
   kind: 'matrix';
   /** Per-tier parameters, indexed by tier (0-based). Length = r. */
   tiers: TierPeriodParams[];
+  /** Whether to automatically grant all extension requests. Default: true. */
+  autoGrantExtensions: boolean;
 }
 
 /** Union type for policy representations. */

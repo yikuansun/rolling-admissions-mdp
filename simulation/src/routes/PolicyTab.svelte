@@ -86,6 +86,14 @@
           onclick={resetPolicy}>Reset All</button>
       </div>
 
+      <!-- Extension grant toggle -->
+      <div class="flex items-center gap-2 mb-4">
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" class="rounded" bind:checked={policy.autoGrantExtensions} />
+          <span class="text-gray-700">Auto-grant all deadline extension requests</span>
+        </label>
+      </div>
+
       <!-- Per-period table -->
       <div class="overflow-x-auto">
         <table class="text-sm border border-gray-200 w-full">

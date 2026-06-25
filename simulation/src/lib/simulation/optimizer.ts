@@ -94,7 +94,7 @@ export function decodeGenome(genes: Float64Array, params: ModelParameters): Poli
     tiers[tier] = { minWaitlist, minCapacity, offersToExtend };
   }
 
-  return { kind: 'matrix', tiers };
+  return { kind: 'matrix', tiers, autoGrantExtensions: true };
 }
 
 /** Encode a MatrixPolicy into a genome. */
