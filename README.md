@@ -6,11 +6,24 @@ This is part of an operations research project surrounding MBA Admissions. The g
 
 ## Project Structure
 
-- `main.tex`: LaTeX file for the model (that the simulation is based on)
-- `main.pdf`: Rendered PDF of `main.tex`
-- `simulation/`: Directory containing the simulation code
-  - `lib/simulation/`: Directory containing main simulation code and logic
-  - `routes/`: Frontend code for the simulation UI
+```
+simulation/
+├── src/                          Source code
+│   ├── lib/                      Shared code
+│   │   └── simulation/           Main simulation code
+│   │       ├── csv-import.ts     CSV helper functions
+│   │       ├── defaults.ts       Populate default parameters
+│   │       ├── engine.ts         Main simulation engine
+│   │       ├── export.ts         Export to CSV
+│   │       ├── optimizer.ts      Genetic algorithm engine
+│   │       ├── serialization.ts  Serialize/deserialize model parameters (for web workers, used by optimizer)
+│   │       ├── policy.ts         Convert policy definition into function
+│   │       └── tensor.ts         Class definitions for tensors (using typed arrays for performance)
+│   └── routes/                   Frontend code
+└── package.json                  Node.js dependencies
+
+main.tex                          Paper
+```
 
 ## Usage
 
