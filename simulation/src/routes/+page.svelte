@@ -9,9 +9,10 @@
   import PolicyTab from './PolicyTab.svelte';
   import ResultsTab from './ResultsTab.svelte';
   import OptimizerTab from './OptimizerTab.svelte';
+  import HistoricalTab from './HistoricalTab.svelte';
 
   // --- State ---
-  let activeTab: 'params' | 'policy' | 'results' | 'optimizer' = $state('params');
+  let activeTab: 'params' | 'policy' | 'results' | 'optimizer' | 'historical' = $state('params');
   let params: ModelParameters = $state(createDefaultParams());
   let policy: Policy = $state(createDefaultMatrixPolicy(params.r, params.T));
   let numRuns: number = $state(100);
@@ -72,6 +73,14 @@
     >
       Simulation Results
     </button>
+    <button
+      class="px-4 py-2 -mb-px text-sm font-medium transition-colors {activeTab === 'historical'
+        ? 'border-b-2 border-amber-500 text-amber-600'
+        : 'text-gray-500 hover:text-gray-700'}"
+      onclick={() => (activeTab = 'historical')}
+    >
+      Historical
+    </button>
   </div>
 
   <!-- Tab content -->
@@ -81,6 +90,8 @@
     <PolicyTab {params} bind:policy {running} onRun={runSim} />
   {:else if activeTab === 'optimizer'}
     <OptimizerTab {params} onApplyPolicy={applyOptimizedPolicy} />
+  {:else if activeTab === 'historical'}
+    <HistoricalTab {params} {policy} />
   {:else}
     <ResultsTab bind:this={resultsTab} {params} {results} />
   {/if}

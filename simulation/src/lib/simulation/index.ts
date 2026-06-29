@@ -8,3 +8,4 @@ export * from './policy';
 export * from './csv-import';
 export * from './optimizer';
 export * from './serialization';
+export * from './historical';
